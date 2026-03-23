@@ -71,3 +71,15 @@ API available at http://localhost:8000 and docs at http://localhost:8000/docs.
 - Schedule, projections, odds, and recommendations all use mock services/interfaces.
 - Date input is validated: selected dates more than 1 day ahead are rejected with HTTP 422.
 - PostgreSQL is planned and represented by `DATABASE_URL` examples only.
+
+
+## Historical data pipeline (hockey)
+
+Historical ingestion/normalization and feature-ready outputs live in `packages/modeling/src/quick_netters_modeling/historical/`.
+
+- Design and schema details: `docs/historical-data-pipeline.md`
+- CLI entrypoint:
+
+```bash
+PYTHONPATH=packages/modeling/src python -m quick_netters_modeling.historical.cli --current-season 2026 --data-root packages/modeling/data
+```
