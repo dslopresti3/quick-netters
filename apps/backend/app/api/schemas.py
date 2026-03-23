@@ -27,10 +27,12 @@ class Recommendation(BaseModel):
     player_id: str
     player_name: str
     model_probability: float
+    implied_probability: float | None = None
     fair_odds: int
     market_odds: int
     edge: float
     ev: float
+    odds_snapshot_at: datetime | None = None
     confidence_tag: ConfidenceTag | None = None
 
 

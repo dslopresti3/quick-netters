@@ -15,10 +15,12 @@ export interface Recommendation {
   player_id: string;
   player_name: string;
   model_probability: number;
+  implied_probability?: number;
   fair_odds: number;
   market_odds: number;
   edge: number;
   ev: number;
+  odds_snapshot_at?: string;
   confidence_tag?: ConfidenceTag;
 }
 
