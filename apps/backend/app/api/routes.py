@@ -1,4 +1,5 @@
 from datetime import date
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
@@ -16,6 +17,7 @@ from app.utils.date_validation import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def get_provider_registry(request: Request) -> ProviderRegistry:
@@ -49,6 +51,12 @@ def _build_date_availability(selected_date: date, providers: ProviderRegistry) -
     schedule_available = len(games) > 0
 
     if not schedule_available:
+        schedule_fetch_failure_note = _schedule_fetch_failure_note(providers)
+        if schedule_fetch_failure_note is not None:
+            logger.warning(
+                "Date availability has no schedule due to upstream fetch failure",
+                extra={"selected_date": selected_date.isoformat(), "note": schedule_fetch_failure_note},
+            )
         return DateAvailabilityResponse(
             selected_date=selected_date,
             min_allowed_date=window.min_allowed_date,
@@ -58,7 +66,10 @@ def _build_date_availability(selected_date: date, providers: ProviderRegistry) -
             projections_available=False,
             odds_available=False,
             status="no_schedule",
-            messages=["No scheduled games are currently published for this date."],
+            messages=[
+                "No scheduled games are currently published for this date.",
+                *( [schedule_fetch_failure_note] if schedule_fetch_failure_note is not None else [] ),
+            ],
         )
 
     projections_available = providers.recommendation_service.projections_available(selected_date)
@@ -105,6 +116,13 @@ def _availability_notes(selected_date: date, providers: ProviderRegistry) -> tup
     return metadata.projections_available, metadata.odds_available, notes
 
 
+def _schedule_fetch_failure_note(providers: ProviderRegistry) -> str | None:
+    error_note = getattr(providers.schedule_provider, "last_fetch_error", None)
+    if isinstance(error_note, str) and error_note:
+        return error_note
+    return None
+
+
 @router.get("/availability/date", response_model=DateAvailabilityResponse)
 def get_date_availability(
     date: date = Query(..., description="UTC date to validate and check data coverage for"),
@@ -120,8 +138,34 @@ def get_games(
 ) -> GamesResponse:
     ensure_date_not_more_than_one_day_ahead(date)
     games = providers.schedule_provider.fetch(date)
+    logger.info(
+        "Games fetched before recommendation attachment",
+        extra={"selected_date": date.isoformat(), "games_count_before_recommendation_attachment": len(games)},
+    )
     games = providers.recommendation_service.attach_top_projected_scorers(date, games)
-    projections_available, odds_available, notes = _availability_notes(date, providers)
+    logger.info(
+        "Games after recommendation attachment",
+        extra={"selected_date": date.isoformat(), "games_count_after_recommendation_attachment": len(games)},
+    )
+    notes: list[str] = []
+    if len(games) == 0:
+        projections_available = False
+        odds_available = False
+    else:
+        projections_available = providers.recommendation_service.projections_available(date)
+        odds_available = providers.recommendation_service.odds_available(date)
+        if not projections_available:
+            notes.append("Projections are not available for this date yet. Value picks will appear after model generation runs.")
+        if not odds_available:
+            notes.append("Market odds are not available for this date yet. Value picks will appear once odds are posted.")
+
+    schedule_fetch_failure_note = _schedule_fetch_failure_note(providers)
+    if schedule_fetch_failure_note is not None:
+        notes.append(schedule_fetch_failure_note)
+        logger.warning(
+            "Returning games response with schedule fetch failure note",
+            extra={"selected_date": date.isoformat(), "note": schedule_fetch_failure_note},
+        )
     return GamesResponse(
         date=date,
         games=games,

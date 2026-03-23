@@ -19,7 +19,11 @@ class NhlScheduleProvider(ScheduleProvider):
 
     base_url = "https://api-web.nhle.com/v1/schedule"
 
+    def __init__(self) -> None:
+        self.last_fetch_error: str | None = None
+
     def fetch(self, selected_date: date) -> list[GameSummary]:
+        self.last_fetch_error = None
         url = f"{self.base_url}/{selected_date.isoformat()}"
         logger.info("Fetching NHL schedule", extra={"selected_date": selected_date.isoformat(), "url": url})
         try:
@@ -30,9 +34,15 @@ class NhlScheduleProvider(ScheduleProvider):
                     extra={"selected_date": selected_date.isoformat(), "raw_payload": payload},
                 )
         except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+            self.last_fetch_error = f"NHL schedule fetch failed for {selected_date.isoformat()} from {url}: {exc}"
             logger.warning(
                 "NHL schedule fetch failed",
-                extra={"selected_date": selected_date.isoformat(), "url": url, "error": str(exc)},
+                extra={
+                    "selected_date": selected_date.isoformat(),
+                    "url": url,
+                    "error": str(exc),
+                    "schedule_fetch_error_note": self.last_fetch_error,
+                },
             )
             return []
 

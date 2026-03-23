@@ -1,4 +1,9 @@
+import contextlib
+import io
+import json
 from datetime import date, datetime, time, timedelta, timezone
+from urllib.error import URLError
+from unittest.mock import patch
 
 from app.api.routes import get_daily_recommendations, get_date_availability, get_game_recommendations, get_games
 from app.api.schemas import GameSummary
@@ -7,6 +12,7 @@ from app.services.mock_services import ValueRecommendationService
 from app.services.odds import NormalizedPlayerOdds
 from app.services.odds_provider import LiveOddsProvider
 from app.services.provider_wiring import ProviderRegistry
+from app.services.real_services import NhlScheduleProvider
 
 
 class StubScheduleProvider(ScheduleProvider):
@@ -232,3 +238,54 @@ def test_date_availability_ready_when_all_data_is_available() -> None:
     assert payload.schedule_available is True
     assert payload.projections_available is True
     assert payload.odds_available is True
+
+
+def test_games_route_real_schedule_provider_non_empty_with_upstream_payload() -> None:
+    selected_date = date(2026, 3, 23)
+    schedule_provider = NhlScheduleProvider()
+    providers = _registry_with(
+        schedule_provider=schedule_provider,
+        projection_provider=EmptyProjectionProvider(),
+        odds_provider=EmptyOddsProvider(),
+    )
+    payload = {
+        "gameWeek": [
+            {
+                "date": "2026-03-23",
+                "games": [
+                    {
+                        "id": 2026020101,
+                        "gameDate": "2026-03-24",
+                        "startTimeUTC": "2026-03-24T01:00:00Z",
+                        "gameState": "FUT",
+                        "awayTeam": {"commonName": {"default": "Devils"}},
+                        "homeTeam": {"commonName": {"default": "Islanders"}},
+                    }
+                ],
+            }
+        ]
+    }
+
+    with patch(
+        "app.services.real_services.urlopen",
+        return_value=contextlib.nullcontext(io.StringIO(json.dumps(payload))),
+    ):
+        response = get_games(date=selected_date, providers=providers)
+
+    assert len(response.games) == 1
+
+
+def test_games_route_includes_note_when_schedule_fetch_fails() -> None:
+    selected_date = date(2026, 3, 23)
+    schedule_provider = NhlScheduleProvider()
+    providers = _registry_with(
+        schedule_provider=schedule_provider,
+        projection_provider=EmptyProjectionProvider(),
+        odds_provider=EmptyOddsProvider(),
+    )
+
+    with patch("app.services.real_services.urlopen", side_effect=URLError("boom")):
+        response = get_games(date=selected_date, providers=providers)
+
+    assert response.games == []
+    assert any("NHL schedule fetch failed for 2026-03-23" in note for note in response.notes)
