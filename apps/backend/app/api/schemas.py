@@ -11,6 +11,21 @@ class APIModel(BaseModel):
 ConfidenceTag = Literal["high", "medium", "watch"]
 
 
+DateAvailabilityStatus = Literal["invalid_date", "no_schedule", "missing_projections", "missing_odds", "ready"]
+
+
+class DateAvailabilityResponse(APIModel):
+    selected_date: date
+    min_allowed_date: date
+    max_allowed_date: date
+    valid_by_product_rule: bool
+    schedule_available: bool
+    projections_available: bool
+    odds_available: bool
+    status: DateAvailabilityStatus
+    messages: list[str] = Field(default_factory=list)
+
+
 class HealthResponse(APIModel):
     status: Literal["ok"]
     service: str
