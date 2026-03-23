@@ -2,23 +2,76 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 
 STALE_ODDS_THRESHOLD = timedelta(minutes=30)
+
+FreshnessStatus = Literal["fresh", "stale", "unknown"]
+MatchStatus = Literal["matched", "unmatched", "ambiguous"]
+
+
+@dataclass(frozen=True)
+class OddsEventMapping:
+    provider_name: str
+    provider_event_id: str | None
+    nhl_game_id: str | None
+    away_team_raw: str | None
+    home_team_raw: str | None
+    away_team_normalized: str | None
+    home_team_normalized: str | None
+    provider_start_time: datetime | None
+    nhl_start_time: datetime | None
+    match_status: MatchStatus
+    match_confidence: float
+    matched_at: datetime
+
+
+@dataclass(frozen=True)
+class OddsPlayerMapping:
+    provider_name: str
+    provider_player_id: str | None
+    provider_player_name_raw: str
+    provider_team_raw: str | None
+    nhl_player_id: str | None
+    nhl_player_name: str | None
+    nhl_team: str | None
+    match_status: MatchStatus
+    match_confidence: float
+    matched_at: datetime
 
 
 @dataclass(frozen=True)
 class NormalizedPlayerOdds:
     """Normalized first-goal player pricing from any odds provider."""
 
-    game_id: str
-    player_id: str
+    nhl_game_id: str | None
+    nhl_player_id: str | None
     market_odds_american: int
     snapshot_at: datetime
+    provider_name: str
+    provider_event_id: str | None = None
+    provider_player_id: str | None = None
+    provider_player_name_raw: str | None = None
+    provider_team_raw: str | None = None
+    away_team_raw: str | None = None
+    home_team_raw: str | None = None
+    provider_start_time: datetime | None = None
     source: str | None = None
     book: str | None = None
     freshness_seconds: int | None = None
+    freshness_status: FreshnessStatus = "unknown"
     is_fresh: bool | None = None
+    event_mapping: OddsEventMapping | None = None
+    player_mapping: OddsPlayerMapping | None = None
+
+    @property
+    def game_id(self) -> str | None:
+        return self.nhl_game_id
+
+    @property
+    def player_id(self) -> str | None:
+        return self.nhl_player_id
 
 
 def normalize_snapshot_timestamp(snapshot_at: datetime) -> datetime:

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
 import logging
-import re
+import os
 
 from app.services.projection_store import build_mock_projection_provider
 
 from app.api.schemas import GameSummary, Recommendation, TeamProjectionLeader
+from app.services.identity import name_aliases, normalize_name, normalize_team_token, team_alias_tokens
 from app.services.interfaces import (
     AvailabilityProvider,
     ScheduleProvider,
@@ -18,6 +19,8 @@ from app.services.interfaces import (
 from app.services.odds_provider import LiveOddsProvider
 from app.services.odds import (
     NormalizedPlayerOdds,
+    OddsEventMapping,
+    OddsPlayerMapping,
     american_to_implied_probability,
     expected_value_per_unit,
     fair_american_odds,
@@ -25,60 +28,6 @@ from app.services.odds import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-_RAW_NHL_TEAM_ALIASES = (
-    ("Anaheim Ducks", "Anaheim", "Ducks", "ANA"),
-    ("Boston Bruins", "Boston", "Bruins", "BOS"),
-    ("Buffalo Sabres", "Buffalo", "Sabres", "BUF"),
-    ("Calgary Flames", "Calgary", "Flames", "CGY"),
-    ("Carolina Hurricanes", "Carolina", "Hurricanes", "Canes", "CAR"),
-    ("Chicago Blackhawks", "Chicago", "Blackhawks", "Hawks", "CHI"),
-    ("Colorado Avalanche", "Colorado", "Avalanche", "Avs", "COL"),
-    ("Columbus Blue Jackets", "Columbus", "Blue Jackets", "Jackets", "CBJ"),
-    ("Dallas Stars", "Dallas", "Stars", "DAL"),
-    ("Detroit Red Wings", "Detroit", "Red Wings", "Wings", "DET"),
-    ("Edmonton Oilers", "Edmonton", "Oilers", "EDM"),
-    ("Florida Panthers", "Florida", "Panthers", "FLA"),
-    ("Los Angeles Kings", "Los Angeles", "LA Kings", "Kings", "LAK"),
-    ("Minnesota Wild", "Minnesota", "Wild", "MIN"),
-    ("Montreal Canadiens", "Montreal", "Canadiens", "Habs", "MTL"),
-    ("Nashville Predators", "Nashville", "Predators", "Preds", "NSH"),
-    ("New Jersey Devils", "New Jersey", "NJ Devils", "Devils", "NJD"),
-    ("New York Islanders", "NY Islanders", "New York Islanders", "Islanders", "NYI"),
-    ("New York Rangers", "NY Rangers", "New York Rangers", "Rangers", "NYR"),
-    ("Ottawa Senators", "Ottawa", "Senators", "Sens", "OTT"),
-    ("Philadelphia Flyers", "Philadelphia", "Flyers", "PHI"),
-    ("Pittsburgh Penguins", "Pittsburgh", "Penguins", "Pens", "PIT"),
-    ("San Jose Sharks", "San Jose", "Sharks", "SJS"),
-    ("Seattle Kraken", "Seattle", "Kraken", "SEA"),
-    ("St. Louis Blues", "St Louis", "St. Louis", "Blues", "STL"),
-    ("Tampa Bay Lightning", "Tampa Bay", "Lightning", "Bolts", "TBL"),
-    ("Toronto Maple Leafs", "Toronto", "Maple Leafs", "Leafs", "TOR"),
-    ("Utah Hockey Club", "Utah", "UTAH", "UTA"),
-    ("Vancouver Canucks", "Vancouver", "Canucks", "VAN"),
-    ("Vegas Golden Knights", "Vegas", "Golden Knights", "Knights", "VGK"),
-    ("Washington Capitals", "Washington", "Capitals", "Caps", "WSH"),
-    ("Winnipeg Jets", "Winnipeg", "Jets", "WPG"),
-)
-
-
-def _normalize_team_token(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "", value.strip().lower())
-
-
-_TEAM_TOKEN_ALIASES: dict[str, set[str]] = {}
-for alias_group in _RAW_NHL_TEAM_ALIASES:
-    tokens = {_normalize_team_token(alias) for alias in alias_group if alias.strip()}
-    for token in tokens:
-        _TEAM_TOKEN_ALIASES.setdefault(token, set()).update(tokens)
-
-
-def _team_alias_tokens(team_name: str) -> set[str]:
-    normalized = _normalize_team_token(team_name)
-    if not normalized:
-        return set()
-    return {normalized} | _TEAM_TOKEN_ALIASES.get(normalized, set())
 
 
 class MockGamesService(ScheduleProvider):
@@ -138,8 +87,11 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         return projections_available
 
     def odds_available(self, selected_date: date) -> bool:
+        scheduled_games = self._schedule_provider.fetch(selected_date)
+        projections = self._eligible_projection_candidates(selected_date, scheduled_games)
         snapshots = self._odds_provider.fetch_player_first_goal_odds(selected_date)
-        return any(snapshot.market_odds_american != 0 for snapshot in snapshots)
+        mapped_rows = self._map_odds_rows(selected_date, scheduled_games, projections, snapshots)
+        return any(row.market_odds_american != 0 and not is_stale(row.snapshot_at) for row in mapped_rows)
 
     def attach_top_projected_scorers(self, selected_date: date, games: list[GameSummary]) -> list[GameSummary]:
         top_by_game_team, _ = self._build_top_projection_lookup(selected_date, games)
@@ -182,7 +134,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
             valid_game_ids = {game.game_id for game in games}
             for game in games:
                 for team_name in (game.away_team, game.home_team):
-                    for alias_token in _team_alias_tokens(team_name):
+                    for alias_token in team_alias_tokens(team_name):
                         game_team_lookup[(game.game_id, alias_token)] = team_name
 
         top_by_game_team: dict[tuple[str, str], PlayerProjectionCandidate] = {}
@@ -203,7 +155,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
             if valid_game_ids is not None:
                 if game_id_value not in valid_game_ids:
                     continue
-                team_aliases = _team_alias_tokens(projection_team_name)
+                team_aliases = team_alias_tokens(projection_team_name)
                 if not team_aliases:
                     continue
                 matched_team = None
@@ -250,8 +202,9 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
     def _build_ranked_recommendations(self, selected_date: date) -> list[Recommendation]:
         scheduled_games = self._schedule_provider.fetch(selected_date)
         games_by_id = {game.game_id: game for game in scheduled_games}
-        odds_snapshots = self._odds_provider.fetch_player_first_goal_odds(selected_date)
+        raw_odds_snapshots = self._odds_provider.fetch_player_first_goal_odds(selected_date)
         projections = self._eligible_projection_candidates(selected_date, scheduled_games)
+        odds_snapshots = self._map_odds_rows(selected_date, scheduled_games, projections, raw_odds_snapshots)
 
         projections_by_game_player = {(row.game_id, row.nhl_player_id): row for row in projections}
 
@@ -302,14 +255,14 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
 
         game_team_lookup: dict[str, set[str]] = {}
         for game in games:
-            game_team_lookup[game.game_id] = _team_alias_tokens(game.away_team) | _team_alias_tokens(game.home_team)
+            game_team_lookup[game.game_id] = team_alias_tokens(game.away_team) | team_alias_tokens(game.home_team)
 
         eligible_rows: list[PlayerProjectionCandidate] = []
         for projection in projection_rows:
             if not projection.roster_eligibility.is_active_roster:
                 continue
 
-            team_tokens = _team_alias_tokens(projection.roster_eligibility.active_team_name)
+            team_tokens = team_alias_tokens(projection.roster_eligibility.active_team_name)
             game_tokens = game_team_lookup.get(projection.game_id)
             if not team_tokens or game_tokens is None:
                 continue
@@ -318,6 +271,56 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
             eligible_rows.append(projection)
 
         return eligible_rows
+
+    def _map_odds_rows(
+        self,
+        selected_date: date,
+        scheduled_games: list[GameSummary],
+        projections: list[PlayerProjectionCandidate],
+        odds_rows: list[NormalizedPlayerOdds],
+    ) -> list[NormalizedPlayerOdds]:
+        tolerance_minutes = int(os.getenv("ODDS_EVENT_TIME_TOLERANCE_MINUTES", "90"))
+        tolerance_seconds = tolerance_minutes * 60
+        matched_at = datetime.now(timezone.utc)
+        projections_by_game: dict[str, list[PlayerProjectionCandidate]] = {}
+        for projection in projections:
+            projections_by_game.setdefault(projection.game_id, []).append(projection)
+
+        mapped_rows: list[NormalizedPlayerOdds] = []
+        for row in odds_rows:
+            event_mapping = _match_event_to_game(row=row, scheduled_games=scheduled_games, tolerance_seconds=tolerance_seconds, matched_at=matched_at)
+            player_mapping = _match_player_to_projection(
+                row=row,
+                event_mapping=event_mapping,
+                projections=projections_by_game.get(event_mapping.nhl_game_id or "", []),
+                matched_at=matched_at,
+            )
+            if event_mapping.match_status != "matched" or player_mapping.match_status != "matched":
+                continue
+            mapped_rows.append(
+                NormalizedPlayerOdds(
+                    nhl_game_id=event_mapping.nhl_game_id,
+                    nhl_player_id=player_mapping.nhl_player_id,
+                    market_odds_american=row.market_odds_american,
+                    snapshot_at=row.snapshot_at,
+                    provider_name=row.provider_name,
+                    provider_event_id=row.provider_event_id,
+                    provider_player_id=row.provider_player_id,
+                    provider_player_name_raw=row.provider_player_name_raw,
+                    provider_team_raw=row.provider_team_raw,
+                    away_team_raw=row.away_team_raw,
+                    home_team_raw=row.home_team_raw,
+                    provider_start_time=row.provider_start_time,
+                    source=row.source,
+                    book=row.book,
+                    freshness_seconds=row.freshness_seconds,
+                    freshness_status=row.freshness_status,
+                    is_fresh=row.is_fresh,
+                    event_mapping=event_mapping,
+                    player_mapping=player_mapping,
+                )
+            )
+        return mapped_rows
 
 
 def _build_games(selected_date: date) -> list[GameSummary]:
@@ -346,10 +349,166 @@ def _build_games(selected_date: date) -> list[GameSummary]:
     ]
 
 
+def _match_event_to_game(
+    row: NormalizedPlayerOdds,
+    scheduled_games: list[GameSummary],
+    tolerance_seconds: int,
+    matched_at: datetime,
+) -> OddsEventMapping:
+    away_normalized = normalize_team_token(row.away_team_raw or "")
+    home_normalized = normalize_team_token(row.home_team_raw or "")
+    if not away_normalized or not home_normalized or row.provider_start_time is None:
+        return OddsEventMapping(
+            provider_name=row.provider_name,
+            provider_event_id=row.provider_event_id,
+            nhl_game_id=None,
+            away_team_raw=row.away_team_raw,
+            home_team_raw=row.home_team_raw,
+            away_team_normalized=away_normalized or None,
+            home_team_normalized=home_normalized or None,
+            provider_start_time=row.provider_start_time,
+            nhl_start_time=None,
+            match_status="unmatched",
+            match_confidence=0.0,
+            matched_at=matched_at,
+        )
+
+    candidates: list[tuple[int, float, GameSummary]] = []
+    for game in scheduled_games:
+        away_tokens = team_alias_tokens(game.away_team)
+        home_tokens = team_alias_tokens(game.home_team)
+        away_match = away_normalized in away_tokens
+        home_match = home_normalized in home_tokens
+        if not away_match or not home_match:
+            continue
+        time_delta = abs(int((game.game_time - row.provider_start_time).total_seconds()))
+        if time_delta > tolerance_seconds:
+            continue
+        confidence = max(0.0, 1.0 - (time_delta / max(tolerance_seconds, 1)))
+        candidates.append((time_delta, confidence, game))
+
+    if not candidates:
+        return OddsEventMapping(
+            provider_name=row.provider_name,
+            provider_event_id=row.provider_event_id,
+            nhl_game_id=None,
+            away_team_raw=row.away_team_raw,
+            home_team_raw=row.home_team_raw,
+            away_team_normalized=away_normalized,
+            home_team_normalized=home_normalized,
+            provider_start_time=row.provider_start_time,
+            nhl_start_time=None,
+            match_status="unmatched",
+            match_confidence=0.0,
+            matched_at=matched_at,
+        )
+
+    candidates.sort(key=lambda item: item[0])
+    if len(candidates) > 1 and candidates[0][0] == candidates[1][0]:
+        return OddsEventMapping(
+            provider_name=row.provider_name,
+            provider_event_id=row.provider_event_id,
+            nhl_game_id=None,
+            away_team_raw=row.away_team_raw,
+            home_team_raw=row.home_team_raw,
+            away_team_normalized=away_normalized,
+            home_team_normalized=home_normalized,
+            provider_start_time=row.provider_start_time,
+            nhl_start_time=None,
+            match_status="ambiguous",
+            match_confidence=0.25,
+            matched_at=matched_at,
+        )
+
+    _, confidence, game = candidates[0]
+    return OddsEventMapping(
+        provider_name=row.provider_name,
+        provider_event_id=row.provider_event_id,
+        nhl_game_id=game.game_id,
+        away_team_raw=row.away_team_raw,
+        home_team_raw=row.home_team_raw,
+        away_team_normalized=away_normalized,
+        home_team_normalized=home_normalized,
+        provider_start_time=row.provider_start_time,
+        nhl_start_time=game.game_time,
+        match_status="matched",
+        match_confidence=round(confidence, 4),
+        matched_at=matched_at,
+    )
+
+
+def _match_player_to_projection(
+    row: NormalizedPlayerOdds,
+    event_mapping: OddsEventMapping,
+    projections: list[PlayerProjectionCandidate],
+    matched_at: datetime,
+) -> OddsPlayerMapping:
+    provider_name = row.provider_name
+    player_name_raw = row.provider_player_name_raw or ""
+    provider_team_raw = row.provider_team_raw
+    if event_mapping.match_status != "matched" or not player_name_raw:
+        return OddsPlayerMapping(
+            provider_name=provider_name,
+            provider_player_id=row.provider_player_id,
+            provider_player_name_raw=player_name_raw,
+            provider_team_raw=provider_team_raw,
+            nhl_player_id=None,
+            nhl_player_name=None,
+            nhl_team=None,
+            match_status="unmatched",
+            match_confidence=0.0,
+            matched_at=matched_at,
+        )
+
+    provider_aliases = name_aliases(player_name_raw)
+    team_context_tokens = team_alias_tokens(provider_team_raw) if provider_team_raw else set()
+
+    candidates: list[PlayerProjectionCandidate] = []
+    for projection in projections:
+        if not projection.roster_eligibility.is_active_roster:
+            continue
+        if team_context_tokens and team_context_tokens.isdisjoint(team_alias_tokens(projection.roster_eligibility.active_team_name)):
+            continue
+        if provider_aliases.isdisjoint(name_aliases(projection.player_name)):
+            continue
+        candidates.append(projection)
+
+    if len(candidates) != 1:
+        return OddsPlayerMapping(
+            provider_name=provider_name,
+            provider_player_id=row.provider_player_id,
+            provider_player_name_raw=player_name_raw,
+            provider_team_raw=provider_team_raw,
+            nhl_player_id=None,
+            nhl_player_name=None,
+            nhl_team=None,
+            match_status="unmatched" if not candidates else "ambiguous",
+            match_confidence=0.0 if not candidates else 0.4,
+            matched_at=matched_at,
+        )
+
+    player = candidates[0]
+    confidence = 0.8
+    if normalize_name(player.player_name) == normalize_name(player_name_raw):
+        confidence = 1.0
+    return OddsPlayerMapping(
+        provider_name=provider_name,
+        provider_player_id=row.provider_player_id,
+        provider_player_name_raw=player_name_raw,
+        provider_team_raw=provider_team_raw,
+        nhl_player_id=player.nhl_player_id,
+        nhl_player_name=player.player_name,
+        nhl_team=player.roster_eligibility.active_team_name,
+        match_status="matched",
+        match_confidence=confidence,
+        matched_at=matched_at,
+    )
+
+
 def _latest_snapshot_for_player(
     snapshots: list[NormalizedPlayerOdds], game_id: str, player_id: str
 ) -> NormalizedPlayerOdds | None:
-    candidates = [snapshot for snapshot in snapshots if snapshot.game_id == game_id and snapshot.player_id == player_id]
+    candidates = [snapshot for snapshot in snapshots if snapshot.nhl_game_id == game_id and snapshot.nhl_player_id == player_id]
     if not candidates:
         return None
     return max(candidates, key=lambda snapshot: snapshot.snapshot_at)

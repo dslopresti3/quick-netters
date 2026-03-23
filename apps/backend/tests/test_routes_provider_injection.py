@@ -52,10 +52,17 @@ class StubOddsProvider(OddsProvider):
     def fetch_player_first_goal_odds(self, selected_date: date) -> list[NormalizedPlayerOdds]:
         return [
             NormalizedPlayerOdds(
-                game_id="g-custom-vs-test",
-                player_id="p-custom",
+                nhl_game_id="g-custom-vs-test",
+                nhl_player_id="p-custom",
                 market_odds_american=250,
                 snapshot_at=datetime.now(timezone.utc),
+                provider_name="stub-odds",
+                provider_event_id="evt-custom",
+                provider_player_name_raw="Injected Player",
+                provider_team_raw="Custom Home",
+                away_team_raw="Custom Away",
+                home_team_raw="Custom Home",
+                provider_start_time=datetime.combine(selected_date, time(19, 0), tzinfo=timezone.utc),
             )
         ]
 
@@ -112,6 +119,9 @@ class _StubRawOddsClient:
         return [
             {
                 "id": "g-custom-vs-test",
+                "away_team": "Custom Away",
+                "home_team": "Custom Home",
+                "commence_time": datetime.combine(selected_date, time(19, 0), tzinfo=timezone.utc).isoformat(),
                 "bookmakers": [
                     {
                         "key": "draftkings",
@@ -119,7 +129,7 @@ class _StubRawOddsClient:
                             {
                                 "key": "player_first_goal_scorer",
                                 "last_update": datetime.now(timezone.utc).isoformat(),
-                                "outcomes": [{"name": "Injected Player", "price": 250}],
+                                "outcomes": [{"name": "Injected Player", "description": "Custom Home", "price": 250}],
                             }
                         ],
                     }

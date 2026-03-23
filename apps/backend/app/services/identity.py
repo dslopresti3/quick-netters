@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+import re
+import unicodedata
+
+_RAW_NHL_TEAM_ALIASES = (
+    ("Anaheim Ducks", "Anaheim", "Ducks", "ANA"),
+    ("Boston Bruins", "Boston", "Bruins", "BOS"),
+    ("Buffalo Sabres", "Buffalo", "Sabres", "BUF"),
+    ("Calgary Flames", "Calgary", "Flames", "CGY"),
+    ("Carolina Hurricanes", "Carolina", "Hurricanes", "Canes", "CAR"),
+    ("Chicago Blackhawks", "Chicago", "Blackhawks", "Hawks", "CHI"),
+    ("Colorado Avalanche", "Colorado", "Avalanche", "Avs", "COL"),
+    ("Columbus Blue Jackets", "Columbus", "Blue Jackets", "Jackets", "CBJ"),
+    ("Dallas Stars", "Dallas", "Stars", "DAL"),
+    ("Detroit Red Wings", "Detroit", "Red Wings", "Wings", "DET"),
+    ("Edmonton Oilers", "Edmonton", "Oilers", "EDM"),
+    ("Florida Panthers", "Florida", "Panthers", "FLA"),
+    ("Los Angeles Kings", "Los Angeles", "LA Kings", "Kings", "LAK"),
+    ("Minnesota Wild", "Minnesota", "Wild", "MIN"),
+    ("Montreal Canadiens", "Montreal", "Canadiens", "Habs", "MTL"),
+    ("Nashville Predators", "Nashville", "Predators", "Preds", "NSH"),
+    ("New Jersey Devils", "New Jersey", "NJ Devils", "Devils", "NJD"),
+    ("New York Islanders", "NY Islanders", "New York Islanders", "Islanders", "NYI"),
+    ("New York Rangers", "NY Rangers", "New York Rangers", "Rangers", "NYR"),
+    ("Ottawa Senators", "Ottawa", "Senators", "Sens", "OTT"),
+    ("Philadelphia Flyers", "Philadelphia", "Flyers", "PHI"),
+    ("Pittsburgh Penguins", "Pittsburgh", "Penguins", "Pens", "PIT"),
+    ("San Jose Sharks", "San Jose", "Sharks", "SJS"),
+    ("Seattle Kraken", "Seattle", "Kraken", "SEA"),
+    ("St. Louis Blues", "St Louis", "St. Louis", "Blues", "STL"),
+    ("Tampa Bay Lightning", "Tampa Bay", "Lightning", "Bolts", "TBL"),
+    ("Toronto Maple Leafs", "Toronto", "Maple Leafs", "Leafs", "TOR"),
+    ("Utah Hockey Club", "Utah", "UTAH", "UTA"),
+    ("Vancouver Canucks", "Vancouver", "Canucks", "VAN"),
+    ("Vegas Golden Knights", "Vegas", "Golden Knights", "Knights", "VGK"),
+    ("Washington Capitals", "Washington", "Capitals", "Caps", "WSH"),
+    ("Winnipeg Jets", "Winnipeg", "Jets", "WPG"),
+)
+
+
+def _normalize_ascii(value: str) -> str:
+    folded = unicodedata.normalize("NFKD", value)
+    return "".join(ch for ch in folded if not unicodedata.combining(ch))
+
+
+def normalize_team_token(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", _normalize_ascii(value).strip().lower())
+
+
+def normalize_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", _normalize_ascii(value).strip().lower()).strip()
+
+
+def name_aliases(value: str) -> set[str]:
+    normalized = normalize_name(value)
+    if not normalized:
+        return set()
+
+    aliases = {normalized, normalized.replace(" ", "")}
+    parts = [part for part in normalized.split(" ") if part]
+    if len(parts) >= 2:
+        first, last = parts[0], parts[-1]
+        aliases.add(f"{first[0]} {last}")
+        aliases.add(f"{first[0]}{last}")
+        aliases.add(last)
+    return aliases
+
+
+TEAM_TOKEN_ALIASES: dict[str, set[str]] = {}
+for alias_group in _RAW_NHL_TEAM_ALIASES:
+    tokens = {normalize_team_token(alias) for alias in alias_group if alias.strip()}
+    for token in tokens:
+        TEAM_TOKEN_ALIASES.setdefault(token, set()).update(tokens)
+
+
+def team_alias_tokens(team_name: str) -> set[str]:
+    normalized = normalize_team_token(team_name)
+    if not normalized:
+        return set()
+    return {normalized} | TEAM_TOKEN_ALIASES.get(normalized, set())
