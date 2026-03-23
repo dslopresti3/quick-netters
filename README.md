@@ -69,6 +69,7 @@ API available at http://localhost:8000 and docs at http://localhost:8000/docs.
 
 - No real external APIs are implemented yet.
 - Backend provider wiring is configured in `apps/backend/app/services/provider_wiring.py` via `BACKEND_PROVIDER_MODE` (`real` default, `mock` for local fallback).
+- Real projection loading reads a structured artifact (`BACKEND_PROJECTION_ARTIFACT_PATH`, default `apps/backend/app/data/projections/player_first_goal_projections.json`).
 - Mock schedule/projection/odds providers remain available as development fallbacks and are no longer hardcoded in API routes.
 - Date input is validated: selected dates more than 1 day ahead are rejected with HTTP 422.
 - Odds/value recommendation layer implemented with provider abstraction and formulas documented in `docs/odds-value-layer.md`.

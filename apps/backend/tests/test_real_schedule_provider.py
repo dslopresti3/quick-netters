@@ -3,6 +3,7 @@ from urllib.error import URLError
 from unittest.mock import patch
 
 from app.services.provider_wiring import build_provider_registry_from_env
+from app.services.projection_store import StoreBackedProjectionProvider
 from app.services.real_services import NhlScheduleProvider, _map_schedule_payload
 
 
@@ -60,3 +61,5 @@ def test_registry_real_mode_uses_live_schedule_provider() -> None:
         registry = build_provider_registry_from_env()
 
     assert isinstance(registry.schedule_provider, NhlScheduleProvider)
+
+    assert isinstance(registry.projection_provider, StoreBackedProjectionProvider)
