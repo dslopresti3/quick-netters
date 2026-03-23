@@ -6,7 +6,7 @@ from enum import Enum
 
 from app.services.interfaces import OddsProvider, ProjectionProvider, ScheduleProvider
 from app.services.mock_services import MockGamesService, MockOddsService, MockProjectionService, ValueRecommendationService
-from app.services.real_services import EmptyOddsProvider, EmptyProjectionProvider, EmptyScheduleProvider
+from app.services.real_services import EmptyOddsProvider, EmptyProjectionProvider, NhlScheduleProvider
 
 
 class ProviderMode(str, Enum):
@@ -41,8 +41,7 @@ def build_provider_registry_from_env() -> ProviderRegistry:
         projection_provider = MockProjectionService()
         odds_provider = MockOddsService()
     else:
-        # Real integrations are intentionally stubbed in this change set.
-        schedule_provider = EmptyScheduleProvider()
+        schedule_provider = NhlScheduleProvider()
         projection_provider = EmptyProjectionProvider()
         odds_provider = EmptyOddsProvider()
 
