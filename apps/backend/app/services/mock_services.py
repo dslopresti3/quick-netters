@@ -133,15 +133,22 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
 
         top_by_game_team: dict[tuple[str, str], tuple[str, str, str, str, float]] = {}
         attached_projection_count = 0
+        seen_projection_keys: set[tuple[str, str]] = set()
 
         for idx, projection in enumerate(projection_rows):
             game_id, player_id, player_name, team_name, probability = projection
 
+            if not isinstance(game_id, str) or not game_id.strip():
+                logger.warning("Skipping projection row with missing game_id", extra={"selected_date": selected_date.isoformat(), "row_index": idx})
+                continue
             if not isinstance(player_id, str) or not player_id.strip():
                 logger.warning("Skipping projection row with missing player_id", extra={"selected_date": selected_date.isoformat(), "row_index": idx})
                 continue
             if not isinstance(player_name, str) or not player_name.strip():
                 logger.warning("Skipping projection row with missing player_name", extra={"selected_date": selected_date.isoformat(), "row_index": idx})
+                continue
+            if not isinstance(team_name, str) or not team_name.strip():
+                logger.warning("Skipping projection row with missing team_name", extra={"selected_date": selected_date.isoformat(), "row_index": idx})
                 continue
             if not isinstance(probability, (int, float)):
                 logger.warning(
@@ -158,12 +165,32 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
                 )
                 continue
 
-            projection_key = (game_id, team_name)
+            projection_key = (game_id.strip(), team_name.strip())
             if valid_game_teams is not None and projection_key not in valid_game_teams:
                 continue
 
+            dedupe_key = (projection_key[0], player_id.strip())
+            if dedupe_key in seen_projection_keys:
+                logger.warning(
+                    "Skipping duplicate projection row",
+                    extra={
+                        "selected_date": selected_date.isoformat(),
+                        "row_index": idx,
+                        "game_id": projection_key[0],
+                        "player_id": player_id.strip(),
+                    },
+                )
+                continue
+            seen_projection_keys.add(dedupe_key)
+
             attached_projection_count += 1
-            normalized_projection = (game_id, player_id.strip(), player_name.strip(), team_name, probability_value)
+            normalized_projection = (
+                projection_key[0],
+                player_id.strip(),
+                player_name.strip(),
+                projection_key[1],
+                probability_value,
+            )
             existing = top_by_game_team.get(projection_key)
             if existing is None or probability_value > existing[4]:
                 top_by_game_team[projection_key] = normalized_projection
