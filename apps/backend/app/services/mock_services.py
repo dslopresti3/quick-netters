@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from app.api.schemas import GameSummary, Recommendation, TeamProjectionLeader
 from app.services.interfaces import (
     AvailabilityProvider,
-    GamesProvider,
+    ScheduleProvider,
     OddsProvider,
     ProjectionProvider,
     RecommendationsProvider,
@@ -19,7 +19,7 @@ from app.services.odds import (
 )
 
 
-class MockGamesService(GamesProvider):
+class MockGamesService(ScheduleProvider):
     def __init__(self) -> None:
         self._cache: dict[date, list[GameSummary]] = {}
 
@@ -62,8 +62,8 @@ class MockOddsService(OddsProvider):
 class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
     """Build value recommendations by comparing model probabilities against market odds."""
 
-    def __init__(self, games_provider: GamesProvider, projection_provider: ProjectionProvider, odds_provider: OddsProvider) -> None:
-        self._games_provider = games_provider
+    def __init__(self, schedule_provider: ScheduleProvider, projection_provider: ProjectionProvider, odds_provider: OddsProvider) -> None:
+        self._schedule_provider = schedule_provider
         self._projection_provider = projection_provider
         self._odds_provider = odds_provider
 
@@ -123,7 +123,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         return enriched_games
 
     def _build_ranked_recommendations(self, selected_date: date) -> list[Recommendation]:
-        games_by_id = {game.game_id: game for game in self._games_provider.fetch(selected_date)}
+        games_by_id = {game.game_id: game for game in self._schedule_provider.fetch(selected_date)}
         odds_snapshots = self._odds_provider.fetch_player_first_goal_odds(selected_date)
         projections = self._projection_provider.fetch_player_first_goal_projections(selected_date)
 
@@ -257,7 +257,7 @@ def _mock_model_probabilities() -> list[tuple[str, str, str, str, float]]:
 
 class MockRecommendationsService(ValueRecommendationService):
     def __init__(self) -> None:
-        games_provider = MockGamesService()
+        schedule_provider = MockGamesService()
         projection_provider = MockProjectionService()
         odds_provider = MockOddsService()
-        super().__init__(games_provider=games_provider, projection_provider=projection_provider, odds_provider=odds_provider)
+        super().__init__(schedule_provider=schedule_provider, projection_provider=projection_provider, odds_provider=odds_provider)

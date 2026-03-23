@@ -68,7 +68,8 @@ API available at http://localhost:8000 and docs at http://localhost:8000/docs.
 ## Notes
 
 - No real external APIs are implemented yet.
-- Schedule, projections, odds, and recommendations all use mock services/interfaces.
+- Backend provider wiring is configured in `apps/backend/app/services/provider_wiring.py` via `BACKEND_PROVIDER_MODE` (`real` default, `mock` for local fallback).
+- Mock schedule/projection/odds providers remain available as development fallbacks and are no longer hardcoded in API routes.
 - Date input is validated: selected dates more than 1 day ahead are rejected with HTTP 422.
 - Odds/value recommendation layer implemented with provider abstraction and formulas documented in `docs/odds-value-layer.md`.
 - PostgreSQL is planned and represented by `DATABASE_URL` examples only.
