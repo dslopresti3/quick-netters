@@ -304,7 +304,7 @@ def test_games_stay_visible_when_no_projection_rows_exist_for_date(tmp_path) -> 
     assert all(game.home_top_projected_scorer is None for game in payload.games)
 
 
-def test_store_backed_projection_artifact_attaches_team_leaders_for_game_2025021119(tmp_path) -> None:
+def test_store_backed_projection_artifact_attaches_team_leaders_for_game_2025021119_with_team_alias_match(tmp_path) -> None:
     artifact = tmp_path / "projections.json"
     _write_artifact(
         artifact,
@@ -352,8 +352,8 @@ def test_store_backed_projection_artifact_attaches_team_leaders_for_game_2025021
                 GameSummary(
                     game_id="2025021119",
                     game_time=datetime(2026, 3, 23, 23, 0, tzinfo=timezone.utc),
-                    away_team="Blackhawks",
-                    home_team="Wild",
+                    away_team="Chicago",
+                    home_team="Minnesota",
                     status="FUT",
                 )
             ]
