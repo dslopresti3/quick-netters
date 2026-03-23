@@ -75,10 +75,16 @@ def _extract_games(payload: dict[str, Any]) -> list[dict[str, Any]]:
         for week in game_weeks:
             if not isinstance(week, dict):
                 continue
+            week_date = week.get("date")
             games = week.get("games")
             if not isinstance(games, list):
                 continue
-            extracted.extend(game for game in games if isinstance(game, dict))
+            for game in games:
+                if not isinstance(game, dict):
+                    continue
+                if isinstance(week_date, str) and "_weekDate" not in game:
+                    game = {**game, "_weekDate": week_date}
+                extracted.append(game)
         return extracted
 
     games = payload.get("games")
@@ -92,6 +98,10 @@ def _matches_selected_date(game: dict[str, Any], selected_date_iso: str) -> bool
     game_date = game.get("gameDate")
     if isinstance(game_date, str):
         return game_date == selected_date_iso
+
+    week_date = game.get("_weekDate")
+    if isinstance(week_date, str):
+        return week_date == selected_date_iso
 
     start_time_utc = game.get("startTimeUTC")
     if isinstance(start_time_utc, str) and len(start_time_utc) >= 10:
