@@ -2,12 +2,19 @@ from abc import ABC, abstractmethod
 from datetime import date
 
 from app.api.schemas import GameSummary, Recommendation
+from app.services.odds import NormalizedPlayerOdds
 
 
 class GamesProvider(ABC):
     @abstractmethod
     def fetch(self, selected_date: date) -> list[GameSummary]:
         """Return all games for a date."""
+
+
+class OddsProvider(ABC):
+    @abstractmethod
+    def fetch_player_first_goal_odds(self, selected_date: date) -> list[NormalizedPlayerOdds]:
+        """Return normalized first-goal player odds snapshots for one date."""
 
 
 class RecommendationsProvider(ABC):
