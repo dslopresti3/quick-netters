@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { fetchGameRecommendations, getAllowedDateBounds, getDefaultDate, isAllowedDate } from "../../../lib/mock-api";
+import { fetchDateAvailability, fetchGameRecommendations, getCurrentUtcDate } from "../../../lib/api";
 
 type GameDetailPageProps = {
   params: {
@@ -11,18 +11,39 @@ type GameDetailPageProps = {
 };
 
 export default async function GameDetailPage({ params, searchParams }: GameDetailPageProps) {
-  const selectedDate = searchParams?.date ?? getDefaultDate();
-  const { min, max } = getAllowedDateBounds();
+  const selectedDate = searchParams?.date ?? getCurrentUtcDate();
+  const availability = await fetchDateAvailability(selectedDate);
 
-  if (!isAllowedDate(selectedDate)) {
+  if (!availability.valid_by_product_rule) {
     return (
       <main className="page">
         <h1>Game detail</h1>
         <section className="card stack-gap">
           <h2>Invalid date</h2>
-          <p className="helper-text">Use {min} (today) or {max} (tomorrow), then reopen a game.</p>
-          <Link href={`/slate?date=${getDefaultDate()}`} className="secondary-link">Back to slate</Link>
+          <ul className="candidate-list">
+            {availability.messages.map((message) => (
+              <li key={message}>{message}</li>
+            ))}
+          </ul>
+          <Link href={`/slate?date=${availability.min_allowed_date}`} className="secondary-link">Back to slate</Link>
         </section>
+      </main>
+    );
+  }
+
+  if (!availability.schedule_available) {
+    return (
+      <main className="page stack-gap">
+        <h1>Game detail</h1>
+        <section className="card stack-gap">
+          <h2>No scheduled games</h2>
+          <ul className="candidate-list">
+            {availability.messages.map((message) => (
+              <li key={message}>{message}</li>
+            ))}
+          </ul>
+        </section>
+        <Link href={`/slate?date=${selectedDate}`} className="secondary-link">Back to slate</Link>
       </main>
     );
   }
@@ -63,6 +84,17 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
         </section>
       )}
 
+      {availability.messages.length > 0 && availability.status !== "ready" && (
+        <section className="card stack-gap">
+          <h2>Availability</h2>
+          <ul className="candidate-list">
+            {availability.messages.map((message) => (
+              <li key={message}>{message}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section className="card stack-gap">
         <h2>Top projected first-goal scorers by team</h2>
         <ul className="candidate-list">
@@ -83,8 +115,12 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
 
       <section className="card stack-gap">
         <h2>Top 3 value picks for this game</h2>
-        {topBets.length === 0 ? (
-          <p className="empty-state">No value picks available yet for this game. Check back after projections and odds are both posted.</p>
+        {!availability.projections_available ? (
+          <p className="empty-state">This game is scheduled, but projections are not available yet.</p>
+        ) : !availability.odds_available ? (
+          <p className="empty-state">Projections are available, but market odds are not posted yet.</p>
+        ) : topBets.length === 0 ? (
+          <p className="empty-state">No value picks available yet for this game.</p>
         ) : (
           <table className="bets-table">
             <thead>

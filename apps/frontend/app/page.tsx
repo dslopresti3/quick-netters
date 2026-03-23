@@ -1,9 +1,8 @@
 import { DatePickerForm } from "../components/date-picker-form";
-import { getAllowedDateBounds, getDefaultDate } from "../lib/mock-api";
+import { fetchDateAvailability, getCurrentUtcDate } from "../lib/api";
 
-export default function HomePage() {
-  const defaultDate = getDefaultDate();
-  const { min, max } = getAllowedDateBounds();
+export default async function HomePage() {
+  const availability = await fetchDateAvailability(getCurrentUtcDate());
 
   return (
     <main className="page">
@@ -12,8 +11,14 @@ export default function HomePage() {
 
       <section className="card stack-gap">
         <h2>Start here</h2>
-        <p className="helper-text">Only today and tomorrow are available right now while we are in mock-data mode.</p>
-        <DatePickerForm defaultDate={defaultDate} minDate={min} maxDate={max} submitLabel="View slate" actionPath="/slate" />
+        <p className="helper-text">You can choose any date in the current availability window.</p>
+        <DatePickerForm
+          defaultDate={availability.selected_date}
+          minDate={availability.min_allowed_date}
+          maxDate={availability.max_allowed_date}
+          submitLabel="View slate"
+          actionPath="/slate"
+        />
       </section>
     </main>
   );
