@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
 import logging
+import re
 
 from app.services.projection_store import build_mock_projection_provider
 
@@ -23,6 +24,60 @@ from app.services.odds import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+_RAW_NHL_TEAM_ALIASES = (
+    ("Anaheim Ducks", "Anaheim", "Ducks", "ANA"),
+    ("Boston Bruins", "Boston", "Bruins", "BOS"),
+    ("Buffalo Sabres", "Buffalo", "Sabres", "BUF"),
+    ("Calgary Flames", "Calgary", "Flames", "CGY"),
+    ("Carolina Hurricanes", "Carolina", "Hurricanes", "Canes", "CAR"),
+    ("Chicago Blackhawks", "Chicago", "Blackhawks", "Hawks", "CHI"),
+    ("Colorado Avalanche", "Colorado", "Avalanche", "Avs", "COL"),
+    ("Columbus Blue Jackets", "Columbus", "Blue Jackets", "Jackets", "CBJ"),
+    ("Dallas Stars", "Dallas", "Stars", "DAL"),
+    ("Detroit Red Wings", "Detroit", "Red Wings", "Wings", "DET"),
+    ("Edmonton Oilers", "Edmonton", "Oilers", "EDM"),
+    ("Florida Panthers", "Florida", "Panthers", "FLA"),
+    ("Los Angeles Kings", "Los Angeles", "LA Kings", "Kings", "LAK"),
+    ("Minnesota Wild", "Minnesota", "Wild", "MIN"),
+    ("Montreal Canadiens", "Montreal", "Canadiens", "Habs", "MTL"),
+    ("Nashville Predators", "Nashville", "Predators", "Preds", "NSH"),
+    ("New Jersey Devils", "New Jersey", "NJ Devils", "Devils", "NJD"),
+    ("New York Islanders", "NY Islanders", "New York Islanders", "Islanders", "NYI"),
+    ("New York Rangers", "NY Rangers", "New York Rangers", "Rangers", "NYR"),
+    ("Ottawa Senators", "Ottawa", "Senators", "Sens", "OTT"),
+    ("Philadelphia Flyers", "Philadelphia", "Flyers", "PHI"),
+    ("Pittsburgh Penguins", "Pittsburgh", "Penguins", "Pens", "PIT"),
+    ("San Jose Sharks", "San Jose", "Sharks", "SJS"),
+    ("Seattle Kraken", "Seattle", "Kraken", "SEA"),
+    ("St. Louis Blues", "St Louis", "St. Louis", "Blues", "STL"),
+    ("Tampa Bay Lightning", "Tampa Bay", "Lightning", "Bolts", "TBL"),
+    ("Toronto Maple Leafs", "Toronto", "Maple Leafs", "Leafs", "TOR"),
+    ("Utah Hockey Club", "Utah", "UTAH", "UTA"),
+    ("Vancouver Canucks", "Vancouver", "Canucks", "VAN"),
+    ("Vegas Golden Knights", "Vegas", "Golden Knights", "Knights", "VGK"),
+    ("Washington Capitals", "Washington", "Capitals", "Caps", "WSH"),
+    ("Winnipeg Jets", "Winnipeg", "Jets", "WPG"),
+)
+
+
+def _normalize_team_token(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.strip().lower())
+
+
+_TEAM_TOKEN_ALIASES: dict[str, set[str]] = {}
+for alias_group in _RAW_NHL_TEAM_ALIASES:
+    tokens = {_normalize_team_token(alias) for alias in alias_group if alias.strip()}
+    for token in tokens:
+        _TEAM_TOKEN_ALIASES.setdefault(token, set()).update(tokens)
+
+
+def _team_alias_tokens(team_name: str) -> set[str]:
+    normalized = _normalize_team_token(team_name)
+    if not normalized:
+        return set()
+    return {normalized} | _TEAM_TOKEN_ALIASES.get(normalized, set())
 
 
 class MockGamesService(ScheduleProvider):
@@ -121,15 +176,14 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         games: list[GameSummary] | None,
     ) -> tuple[dict[tuple[str, str], tuple[str, str, str, str, float]], bool]:
         projection_rows = self._projection_provider.fetch_player_first_goal_projections(selected_date)
-        valid_game_teams: set[tuple[str, str]] | None = None
+        valid_game_ids: set[str] | None = None
+        game_team_lookup: dict[tuple[str, str], str] = {}
         if games is not None:
-            valid_game_teams = {
-                (game.game_id, game.away_team)
-                for game in games
-            } | {
-                (game.game_id, game.home_team)
-                for game in games
-            }
+            valid_game_ids = {game.game_id for game in games}
+            for game in games:
+                for team_name in (game.away_team, game.home_team):
+                    for alias_token in _team_alias_tokens(team_name):
+                        game_team_lookup[(game.game_id, alias_token)] = team_name
 
         top_by_game_team: dict[tuple[str, str], tuple[str, str, str, str, float]] = {}
         attached_projection_count = 0
@@ -165,9 +219,26 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
                 )
                 continue
 
-            projection_key = (game_id.strip(), team_name.strip())
-            if valid_game_teams is not None and projection_key not in valid_game_teams:
-                continue
+            game_id_value = game_id.strip()
+            projection_team_name = team_name.strip()
+            resolved_team_name = projection_team_name
+            if valid_game_ids is not None:
+                if game_id_value not in valid_game_ids:
+                    continue
+                team_aliases = _team_alias_tokens(projection_team_name)
+                if not team_aliases:
+                    continue
+                matched_team = None
+                for alias_token in team_aliases:
+                    candidate = game_team_lookup.get((game_id_value, alias_token))
+                    if candidate is not None:
+                        matched_team = candidate
+                        break
+                if matched_team is None:
+                    continue
+                resolved_team_name = matched_team
+
+            projection_key = (game_id_value, resolved_team_name)
 
             dedupe_key = (projection_key[0], player_id.strip())
             if dedupe_key in seen_projection_keys:
@@ -188,7 +259,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
                 projection_key[0],
                 player_id.strip(),
                 player_name.strip(),
-                projection_key[1],
+                resolved_team_name,
                 probability_value,
             )
             existing = top_by_game_team.get(projection_key)
