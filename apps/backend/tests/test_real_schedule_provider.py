@@ -97,6 +97,33 @@ def test_map_schedule_payload_uses_week_date_when_game_date_missing() -> None:
     assert games[0].game_time.isoformat() == "2026-03-24T02:30:00+00:00"
 
 
+def test_map_schedule_payload_keeps_games_when_game_date_is_utc_next_day() -> None:
+    payload = {
+        "gameWeek": [
+            {
+                "date": "2026-03-23",
+                "games": [
+                    {
+                        "id": 2026020101,
+                        "gameDate": "2026-03-24",
+                        "startTimeUTC": "2026-03-24T01:00:00Z",
+                        "gameState": "FUT",
+                        "awayTeam": {"commonName": {"default": "Devils"}},
+                        "homeTeam": {"commonName": {"default": "Islanders"}},
+                    }
+                ],
+            }
+        ]
+    }
+
+    games = _map_schedule_payload(payload, selected_date=date(2026, 3, 23))
+
+    assert len(games) == 1
+    assert games[0].game_id == "2026020101"
+    assert games[0].away_team == "Devils"
+    assert games[0].home_team == "Islanders"
+
+
 def test_schedule_provider_returns_empty_when_upstream_fails() -> None:
     provider = NhlScheduleProvider()
 

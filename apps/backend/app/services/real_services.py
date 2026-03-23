@@ -97,11 +97,17 @@ def _extract_games(payload: dict[str, Any]) -> list[dict[str, Any]]:
 def _matches_selected_date(game: dict[str, Any], selected_date_iso: str) -> bool:
     game_date = game.get("gameDate")
     if isinstance(game_date, str):
-        return game_date == selected_date_iso
+        if game_date == selected_date_iso:
+            return True
+        if len(game_date) >= 10 and game_date[:10] == selected_date_iso:
+            return True
 
     week_date = game.get("_weekDate")
     if isinstance(week_date, str):
-        return week_date == selected_date_iso
+        if week_date == selected_date_iso:
+            return True
+        if len(week_date) >= 10 and week_date[:10] == selected_date_iso:
+            return True
 
     start_time_utc = game.get("startTimeUTC")
     if isinstance(start_time_utc, str) and len(start_time_utc) >= 10:
