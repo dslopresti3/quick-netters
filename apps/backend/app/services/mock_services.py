@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
 
+from app.services.projection_store import build_mock_projection_provider
+
 from app.api.schemas import GameSummary, Recommendation, TeamProjectionLeader
 from app.services.interfaces import (
     AvailabilityProvider,
@@ -32,19 +34,15 @@ class MockGamesService(ScheduleProvider):
 
 
 class MockProjectionService(ProjectionProvider):
-    """Mock provider that mimics model output for projected first-goal probabilities."""
+    """Mock provider that reads first-goal projections from a structured artifact store."""
 
     def __init__(self) -> None:
-        self._cache: dict[date, list[tuple[str, str, str, str, float]]] = {}
+        self._provider = build_mock_projection_provider()
 
     def fetch_player_first_goal_projections(self, selected_date: date) -> list[tuple[str, str, str, str, float]]:
-        if selected_date not in self._cache:
-            if selected_date == date.today() + timedelta(days=1):
-                self._cache[selected_date] = []
-            else:
-                self._cache[selected_date] = _mock_model_probabilities()
-
-        return list(self._cache[selected_date])
+        if selected_date == date.today() + timedelta(days=1):
+            return []
+        return self._provider.fetch_player_first_goal_projections(selected_date)
 
 
 class MockOddsService(OddsProvider):
@@ -243,16 +241,6 @@ def _confidence_tag(ev: float) -> str:
     return "watch"
 
 
-def _mock_model_probabilities() -> list[tuple[str, str, str, str, float]]:
-    return [
-        ("g-nyr-vs-bos", "p-david-pastrnak", "David Pastrnak", "Boston Bruins", 0.23),
-        ("g-col-vs-dal", "p-nathan-mackinnon", "Nathan MacKinnon", "Colorado Avalanche", 0.24),
-        ("g-lak-vs-vgk", "p-jack-eichel", "Jack Eichel", "Vegas Golden Knights", 0.21),
-        ("g-nyr-vs-bos", "p-artemi-panarin", "Artemi Panarin", "NY Rangers", 0.14),
-        ("g-col-vs-dal", "p-invalid-price", "Depth Forward", "Dallas Stars", 0.08),
-        ("g-lak-vs-vgk", "p-stale-line", "Bottom-Six Wing", "LA Kings", 0.11),
-        ("g-nyr-vs-bos", "p-missing-odds", "Secondary Option", "Boston Bruins", 0.05),
-    ]
 
 
 class MockRecommendationsService(ValueRecommendationService):

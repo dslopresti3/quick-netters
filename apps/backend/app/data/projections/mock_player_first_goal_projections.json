@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "projections": [
+    {
+      "date": "2026-03-23",
+      "game_id": "g-nyr-vs-bos",
+      "player_id": "p-david-pastrnak",
+      "player_name": "David Pastrnak",
+      "team_name": "Boston Bruins",
+      "model_probability": 0.23
+    },
+    {
+      "date": "2026-03-23",
+      "game_id": "g-col-vs-dal",
+      "player_id": "p-nathan-mackinnon",
+      "player_name": "Nathan MacKinnon",
+      "team_name": "Colorado Avalanche",
+      "model_probability": 0.24
+    },
+    {
+      "date": "2026-03-23",
+      "game_id": "g-lak-vs-vgk",
+      "player_id": "p-jack-eichel",
+      "player_name": "Jack Eichel",
+      "team_name": "Vegas Golden Knights",
+      "model_probability": 0.21
+    },
+    {
+      "date": "2026-03-23",
+      "game_id": "g-nyr-vs-bos",
+      "player_id": "p-artemi-panarin",
+      "player_name": "Artemi Panarin",
+      "team_name": "NY Rangers",
+      "model_probability": 0.14
+    },
+    {
+      "date": "2026-03-23",
+      "game_id": "g-col-vs-dal",
+      "player_id": "p-invalid-price",
+      "player_name": "Depth Forward",
+      "team_name": "Dallas Stars",
+      "model_probability": 0.08
+    },
+    {
+      "date": "2026-03-23",
+      "game_id": "g-lak-vs-vgk",
+      "player_id": "p-stale-line",
+      "player_name": "Bottom-Six Wing",
+      "team_name": "LA Kings",
+      "model_probability": 0.11
+    },
+    {
+      "date": "2026-03-23",
+      "game_id": "g-nyr-vs-bos",
+      "player_id": "p-missing-odds",
+      "player_name": "Secondary Option",
+      "team_name": "Boston Bruins",
+      "model_probability": 0.05
+    }
+  ]
+}
