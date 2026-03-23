@@ -19,7 +19,7 @@ class TheOddsApiClient:
     provider_name = "the-odds-api"
 
     def __init__(self, api_key: str | None = None, timeout_seconds: int = 10) -> None:
-        self._api_key = api_key or os.getenv("ODDS_API_KEY")
+        self._api_key = api_key or os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY")
         self._timeout_seconds = timeout_seconds
 
     def fetch_raw_events(self, selected_date: date) -> list[dict[str, Any]]:
