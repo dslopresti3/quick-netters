@@ -29,6 +29,7 @@ class GameSummary(APIModel):
     game_time: datetime = Field(..., description="Scheduled start time in UTC")
     away_team: str
     home_team: str
+    status: str | None = Field(default=None, description="Upstream game status, if available")
     away_top_projected_scorer: TeamProjectionLeader | None = None
     home_top_projected_scorer: TeamProjectionLeader | None = None
 
