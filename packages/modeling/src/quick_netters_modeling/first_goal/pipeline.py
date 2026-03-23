@@ -24,6 +24,10 @@ class _TeamRateStats:
 class _PlayerRateStats:
     weighted_games: float = 0.0
     weighted_first_goals: float = 0.0
+    current_season_games: float = 0.0
+    current_season_first_goals: float = 0.0
+    prior_season_games: float = 0.0
+    prior_season_first_goals: float = 0.0
 
 
 class FirstGoalProbabilityPipeline:
@@ -43,16 +47,24 @@ class FirstGoalProbabilityPipeline:
         scheduled_games: list[ScheduledGame],
         scheduled_lineups: list[ScheduledLineupPlayer],
     ) -> list[PlayerFirstGoalPrediction]:
-        team_rates = self._build_team_rates(team_games)
-        team_player_stats = self._build_team_player_stats(player_games)
-
         lineup_by_game_team: dict[tuple[str, int], list[ScheduledLineupPlayer]] = defaultdict(list)
         for row in scheduled_lineups:
             if row.is_expected_active:
                 lineup_by_game_team[(row.game_id, row.team_id)].append(row)
 
+        model_cache: dict[tuple[int, date], tuple[dict[int, float], dict[int, dict[int, _PlayerRateStats]]]] = {}
         predictions: list[PlayerFirstGoalPrediction] = []
         for game in scheduled_games:
+            cache_key = (game.season, game.game_date)
+            if cache_key not in model_cache:
+                game_team_samples = self._samples_for_game_date(team_games, game.season, game.game_date)
+                game_player_samples = self._samples_for_game_date(player_games, game.season, game.game_date)
+                model_cache[cache_key] = (
+                    self._build_team_rates(game_team_samples, current_season=game.season),
+                    self._build_team_player_stats(game_player_samples, current_season=game.season),
+                )
+            team_rates, team_player_stats = model_cache[cache_key]
+
             home_lineup = lineup_by_game_team.get((game.game_id, game.home_team_id), [])
             away_lineup = lineup_by_game_team.get((game.game_id, game.away_team_id), [])
 
@@ -89,18 +101,47 @@ class FirstGoalProbabilityPipeline:
 
         return predictions
 
-    def _season_weight(self, season: int, current_season: int) -> float:
+    def _samples_for_game_date(self, samples: list, current_season: int, game_date: date) -> list:
+        return [
+            row
+            for row in samples
+            if row.season in {current_season - 1, current_season}
+            and (row.season < current_season or row.game_date < game_date)
+        ]
+
+    def _season_weight(self, season: int, current_season: int, current_games_per_team: float) -> float:
+        if season not in {current_season, current_season - 1}:
+            return 0.0
+
+        ramp_games = max(1.0, float(self.config.season_weights.in_season_ramp_games))
+        progress = min(1.0, max(0.0, current_games_per_team / ramp_games))
+
+        last_multiplier = (
+            (1.0 - progress) * self.config.season_weights.early_season_last_season_multiplier
+            + progress
+        )
+        current_multiplier = (
+            (1.0 - progress) * self.config.season_weights.early_season_current_season_multiplier
+            + progress
+        )
         return (
-            self.config.season_weights.current_season
+            self.config.season_weights.current_season * current_multiplier
             if season == current_season
-            else self.config.season_weights.last_season
+            else self.config.season_weights.last_season * last_multiplier
         )
 
-    def _build_team_rates(self, team_games: list[TeamGameSample]) -> dict[int, float]:
+    def _build_team_rates(self, team_games: list[TeamGameSample], current_season: int) -> dict[int, float]:
         if not team_games:
             return {}
 
-        current_season = max(row.season for row in team_games)
+        current_rows = [row for row in team_games if row.season == current_season]
+        current_teams = {row.team_id for row in current_rows}
+        current_games_per_team = (
+            len(current_rows) / len(current_teams)
+            if current_teams
+            else 0.0
+        )
+
         by_team: dict[int, list[TeamGameSample]] = defaultdict(list)
         for row in team_games:
             by_team[row.team_id].append(row)
@@ -108,16 +149,16 @@ class FirstGoalProbabilityPipeline:
         league_games = 0.0
         league_first_goals = 0.0
         for row in team_games:
-            w = self._season_weight(row.season, current_season)
+            w = self._season_weight(row.season, current_season, current_games_per_team)
             league_games += w
             league_first_goals += w * (1.0 if row.scored_first else 0.0)
         league_rate = (league_first_goals / league_games) if league_games else 0.5
 
         rates: dict[int, float] = {}
         for team_id, rows in by_team.items():
-            long_stats = self._team_rate_from_rows(rows, current_season)
+            long_stats = self._team_rate_from_rows(rows, current_season, current_games_per_team)
             recent_rows = sorted(rows, key=lambda x: x.game_date, reverse=True)[: self.config.rolling_windows.team_games]
-            recent_stats = self._team_rate_from_rows(recent_rows, current_season)
+            recent_stats = self._team_rate_from_rows(recent_rows, current_season, current_games_per_team)
 
             long_rate = (
                 long_stats.weighted_first_goals / long_stats.weighted_games
@@ -147,10 +188,15 @@ class FirstGoalProbabilityPipeline:
 
         return rates
 
-    def _team_rate_from_rows(self, rows: list[TeamGameSample], current_season: int) -> _TeamRateStats:
+    def _team_rate_from_rows(
+        self,
+        rows: list[TeamGameSample],
+        current_season: int,
+        current_games_per_team: float,
+    ) -> _TeamRateStats:
         stats = _TeamRateStats()
         for row in rows:
-            w = self._season_weight(row.season, current_season)
+            w = self._season_weight(row.season, current_season, current_games_per_team)
             stats.weighted_games += w
             stats.weighted_first_goals += w * (1.0 if row.scored_first else 0.0)
         return stats
@@ -177,43 +223,65 @@ class FirstGoalProbabilityPipeline:
     def _build_team_player_stats(
         self,
         player_games: list[PlayerGameSample],
+        current_season: int,
     ) -> dict[int, dict[int, _PlayerRateStats]]:
         if not player_games:
             return {}
 
-        current_season = max(row.season for row in player_games)
-        by_team_player: dict[int, dict[int, _PlayerRateStats]] = defaultdict(dict)
+        current_rows = [row for row in player_games if row.season == current_season]
+        current_players = {(row.team_id, row.player_id) for row in current_rows}
+        current_games_per_player = (
+            len(current_rows) / len(current_players)
+            if current_players
+            else 0.0
+        )
 
-        long_rows = player_games
-        recent_rows = sorted(player_games, key=lambda x: x.game_date, reverse=True)[: self.config.rolling_windows.player_games]
+        by_team_player_rows: dict[int, dict[int, list[PlayerGameSample]]] = defaultdict(lambda: defaultdict(list))
+        for row in player_games:
+            by_team_player_rows[row.team_id][row.player_id].append(row)
 
-        long_stats = self._player_stats_from_rows(long_rows, current_season)
-        recent_stats = self._player_stats_from_rows(recent_rows, current_season)
+        out: dict[int, dict[int, _PlayerRateStats]] = defaultdict(dict)
+        for team_id, players in by_team_player_rows.items():
+            for player_id, rows in players.items():
+                sorted_rows = sorted(rows, key=lambda x: x.game_date, reverse=True)
+                long_stats = self._single_player_stats_from_rows(
+                    sorted_rows, current_season, current_games_per_player
+                )
+                recent_stats = self._single_player_stats_from_rows(
+                    sorted_rows[: self.config.rolling_windows.player_games],
+                    current_season,
+                    current_games_per_player,
+                )
 
-        # Merge long and recent counts by configurable blend.
-        for team_id, players in long_stats.items():
-            for player_id, stats in players.items():
-                rstats = recent_stats.get(team_id, {}).get(player_id, _PlayerRateStats())
-                out = _PlayerRateStats()
                 rw = self.config.rolling_windows.player_recent_weight
-                out.weighted_games = ((1.0 - rw) * stats.weighted_games) + (rw * rstats.weighted_games)
-                out.weighted_first_goals = ((1.0 - rw) * stats.weighted_first_goals) + (rw * rstats.weighted_first_goals)
-                by_team_player[team_id][player_id] = out
+                merged = _PlayerRateStats(
+                    weighted_games=((1.0 - rw) * long_stats.weighted_games) + (rw * recent_stats.weighted_games),
+                    weighted_first_goals=((1.0 - rw) * long_stats.weighted_first_goals) + (rw * recent_stats.weighted_first_goals),
+                    current_season_games=long_stats.current_season_games,
+                    current_season_first_goals=long_stats.current_season_first_goals,
+                    prior_season_games=long_stats.prior_season_games,
+                    prior_season_first_goals=long_stats.prior_season_first_goals,
+                )
+                out[team_id][player_id] = merged
+        return out
 
-        return by_team_player
-
-    def _player_stats_from_rows(
+    def _single_player_stats_from_rows(
         self,
         rows: list[PlayerGameSample],
         current_season: int,
-    ) -> dict[int, dict[int, _PlayerRateStats]]:
-        out: dict[int, dict[int, _PlayerRateStats]] = defaultdict(dict)
+        current_games_per_player: float,
+    ) -> _PlayerRateStats:
+        out = _PlayerRateStats()
         for row in rows:
-            team_players = out[row.team_id]
-            stats = team_players.setdefault(row.player_id, _PlayerRateStats())
-            w = self._season_weight(row.season, current_season)
-            stats.weighted_games += w
-            stats.weighted_first_goals += w * (1.0 if row.scored_first_for_team else 0.0)
+            w = self._season_weight(row.season, current_season, current_games_per_player)
+            out.weighted_games += w
+            out.weighted_first_goals += w * (1.0 if row.scored_first_for_team else 0.0)
+            if row.season == current_season:
+                out.current_season_games += w
+                out.current_season_first_goals += w * (1.0 if row.scored_first_for_team else 0.0)
+            elif row.season == current_season - 1:
+                out.prior_season_games += w
+                out.prior_season_first_goals += w * (1.0 if row.scored_first_for_team else 0.0)
         return out
 
     def _predict_players_for_team(
@@ -232,11 +300,35 @@ class FirstGoalProbabilityPipeline:
         team_first_goals = sum(stats.weighted_first_goals for stats in team_stats.values())
 
         prior_shares = self._build_prior_shares(lineup)
+        empirical_signals: dict[int, float] = {}
+
+        for player in lineup:
+            stats = team_stats.get(player.player_id, _PlayerRateStats())
+            current_rate = (
+                stats.current_season_first_goals / stats.current_season_games
+                if stats.current_season_games > 0
+                else 0.0
+            )
+            prior_rate = (
+                stats.prior_season_first_goals / stats.prior_season_games
+                if stats.prior_season_games > 0
+                else current_rate
+            )
+            full_weight_games = float(max(1, self.config.shrinkage.player_current_baseline_games))
+            current_weight = min(1.0, stats.current_season_games / full_weight_games)
+            regressed_rate = (current_weight * current_rate) + ((1.0 - current_weight) * prior_rate)
+            empirical_signals[player.player_id] = max(0.0, regressed_rate)
+
+        team_empirical_signal = sum(empirical_signals.values())
         unnormalized: dict[int, float] = {}
 
         for player in lineup:
             stats = team_stats.get(player.player_id, _PlayerRateStats())
-            raw_share = (stats.weighted_first_goals / team_first_goals) if team_first_goals > 0 else 0.0
+            raw_share = (
+                empirical_signals[player.player_id] / team_empirical_signal
+                if team_empirical_signal > 0
+                else 0.0
+            )
 
             has_team_sample = team_first_goals >= self.config.minimum_samples.team_first_goals
             has_player_sample = stats.weighted_games >= self.config.minimum_samples.player_games

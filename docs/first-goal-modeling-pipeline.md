@@ -23,6 +23,15 @@ Default config: `packages/modeling/config/first_goal_model_config.json`
 ## v1 behavior (config-driven)
 
 - **Seasons**: supports last season + current season by weighting each row via `season_weights`.
+  - `season_weights.last_season` and `season_weights.current_season` control base contribution.
+  - Early in the season, date-aware ramping adjusts these base values using:
+    - `season_weights.early_season_last_season_multiplier`
+    - `season_weights.early_season_current_season_multiplier`
+    - `season_weights.in_season_ramp_games`
+  - Tuning guidance:
+    - Increase `early_season_last_season_multiplier` to lean more on prior season signal in October/November.
+    - Decrease `early_season_current_season_multiplier` to reduce noisy current-season impact early.
+    - Lower `in_season_ramp_games` to trust current-season results sooner.
 - **Team layer**:
   - long-window weighted rate,
   - recent-window weighted rate,
@@ -30,10 +39,15 @@ Default config: `packages/modeling/config/first_goal_model_config.json`
   - shrink toward league baseline with `shrinkage.team_prior_strength`,
   - optional home/away adjustment.
 - **Player layer**:
-  - long/recent weighted player first-goal counts,
+  - long/recent weighted player first-goal counts (per player rolling form),
   - team and player minimum-sample guards,
+  - regression of player current-season rate toward prior-season baseline when current-season samples are limited (`shrinkage.player_current_baseline_games`),
   - shrink toward lineup prior using `shrinkage.player_prior_strength`,
   - prior is TOI-based when enabled, otherwise uniform lineup prior.
+
+- **Rolling form features**:
+  - Team rolling form: `rolling_windows.team_games` + `rolling_windows.team_recent_weight`.
+  - Player rolling form: `rolling_windows.player_games` + `rolling_windows.player_recent_weight`.
 
 ## Outputs
 
