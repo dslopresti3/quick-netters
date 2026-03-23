@@ -1,39 +1,39 @@
-export interface TeamFirstGoalProjection {
-  team: string;
-  topScorer: string;
-  fairProbability: number;
+export type ConfidenceTag = "high" | "medium" | "watch";
+
+export interface GameSummary {
+  game_id: string;
+  game_time: string;
+  away_team: string;
+  home_team: string;
 }
 
-export interface GameSlateCard {
-  id: string;
+export interface Recommendation {
+  game_id: string;
+  game_time: string;
+  away_team: string;
+  home_team: string;
+  player_id: string;
+  player_name: string;
+  model_probability: number;
+  fair_odds: number;
+  market_odds: number;
+  edge: number;
+  ev: number;
+  confidence_tag?: ConfidenceTag;
+}
+
+export interface GamesResponse {
   date: string;
-  league: string;
-  startTimeUtc: string;
-  awayTeam: TeamFirstGoalProjection;
-  homeTeam: TeamFirstGoalProjection;
-  marketOdds: string;
-  edge: string;
+  games: GameSummary[];
 }
 
-export interface ValuePick {
-  gameId: string;
-  player: string;
-  team: string;
-  modelProbability: number;
-  fairOdds: string;
-  marketOdds: string;
-  edge: string;
-}
-
-export interface PlayerBet extends ValuePick {
-  confidenceTier: "high" | "medium" | "watch";
-}
-
-export interface GameDetail {
-  gameId: string;
+export interface DailyRecommendationsResponse {
   date: string;
-  matchup: string;
-  startTimeUtc: string;
-  topBets: PlayerBet[];
-  candidatePlayers: PlayerBet[];
+  recommendations: Recommendation[];
+}
+
+export interface GameRecommendationsResponse {
+  date: string;
+  game: GameSummary;
+  recommendations: Recommendation[];
 }

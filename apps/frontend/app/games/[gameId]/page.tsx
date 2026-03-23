@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { fetchGameDetail, getAllowedDateBounds, getDefaultDate, isAllowedDate } from "../../../lib/mock-api";
+import { fetchGameRecommendations, getAllowedDateBounds, getDefaultDate, isAllowedDate } from "../../../lib/mock-api";
 
 type GameDetailPageProps = {
   params: {
@@ -27,54 +27,59 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
     );
   }
 
-  const game = await fetchGameDetail(params.gameId, selectedDate);
+  const gameResponse = await fetchGameRecommendations(params.gameId, selectedDate);
 
-  if (!game) {
+  if (!gameResponse) {
     return (
       <main className="page stack-gap">
         <h1>Game detail</h1>
         <section className="card">
-          <p className="empty-state">No mock game detail exists for this matchup and date yet.</p>
+          <p className="empty-state">No game detail exists for this matchup and date yet.</p>
         </section>
         <Link href={`/slate?date=${selectedDate}`} className="secondary-link">Back to slate</Link>
       </main>
     );
   }
 
+  const topBets = gameResponse.recommendations.slice(0, 3);
+  const candidatePlayers = gameResponse.recommendations.slice(3);
+
   return (
     <main className="page stack-gap-lg">
       <header className="stack-gap-sm">
-        <p className="subtitle">{game.date}</p>
-        <h1>{game.matchup}</h1>
-        <p className="helper-text">Start {new Date(game.startTimeUtc).toLocaleString("en-US", { timeZone: "UTC" })} UTC</p>
+        <p className="subtitle">{gameResponse.date}</p>
+        <h1>{gameResponse.game.away_team} @ {gameResponse.game.home_team}</h1>
+        <p className="helper-text">Start {new Date(gameResponse.game.game_time).toLocaleString("en-US", { timeZone: "UTC" })} UTC</p>
         <Link href={`/slate?date=${selectedDate}`} className="secondary-link">← Back to slate</Link>
       </header>
 
       <section className="card stack-gap">
         <h2>Top 3 best bets</h2>
-        {game.topBets.length === 0 ? (
+        {topBets.length === 0 ? (
           <p className="empty-state">No top bets available for this game.</p>
         ) : (
           <table className="bets-table">
             <thead>
               <tr>
                 <th>Player</th>
-                <th>Team</th>
                 <th>Model probability</th>
                 <th>Fair odds</th>
                 <th>Market odds</th>
                 <th>Edge</th>
+                <th>EV</th>
+                <th>Confidence</th>
               </tr>
             </thead>
             <tbody>
-              {game.topBets.map((bet) => (
-                <tr key={bet.player}>
-                  <td>{bet.player}</td>
-                  <td>{bet.team}</td>
-                  <td>{(bet.modelProbability * 100).toFixed(1)}%</td>
-                  <td>{bet.fairOdds}</td>
-                  <td>{bet.marketOdds}</td>
-                  <td>{bet.edge}</td>
+              {topBets.map((bet) => (
+                <tr key={bet.player_id}>
+                  <td>{bet.player_name}</td>
+                  <td>{(bet.model_probability * 100).toFixed(1)}%</td>
+                  <td>+{bet.fair_odds}</td>
+                  <td>+{bet.market_odds}</td>
+                  <td>{(bet.edge * 100).toFixed(1)}%</td>
+                  <td>{(bet.ev * 100).toFixed(1)}%</td>
+                  <td>{bet.confidence_tag ?? "-"}</td>
                 </tr>
               ))}
             </tbody>
@@ -84,13 +89,13 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
 
       <section className="card stack-gap">
         <h2>Additional candidate players</h2>
-        {game.candidatePlayers.length === 0 ? (
+        {candidatePlayers.length === 0 ? (
           <p className="empty-state">No additional players for this game yet.</p>
         ) : (
           <ul className="candidate-list">
-            {game.candidatePlayers.map((bet) => (
-              <li key={bet.player}>
-                <strong>{bet.player}</strong> ({bet.team}) · Model {(bet.modelProbability * 100).toFixed(1)}% · Fair {bet.fairOdds} · {bet.marketOdds} · {bet.edge}
+            {candidatePlayers.map((bet) => (
+              <li key={bet.player_id}>
+                <strong>{bet.player_name}</strong> · Model {(bet.model_probability * 100).toFixed(1)}% · Fair +{bet.fair_odds} · Market +{bet.market_odds} · Edge {(bet.edge * 100).toFixed(1)}% · EV {(bet.ev * 100).toFixed(1)}% · Confidence {bet.confidence_tag ?? "-"}
               </li>
             ))}
           </ul>
