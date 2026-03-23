@@ -42,7 +42,6 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
   }
 
   const topBets = gameResponse.recommendations.slice(0, 3);
-  const candidatePlayers = gameResponse.recommendations.slice(3);
 
   return (
     <main className="page stack-gap-lg">
@@ -53,10 +52,39 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
         <Link href={`/slate?date=${selectedDate}`} className="secondary-link">← Back to slate</Link>
       </header>
 
+      {gameResponse.notes.length > 0 && (
+        <section className="card stack-gap">
+          <h2>Data updates</h2>
+          <ul className="candidate-list">
+            {gameResponse.notes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section className="card stack-gap">
-        <h2>Top 3 best bets</h2>
+        <h2>Top projected first-goal scorers by team</h2>
+        <ul className="candidate-list">
+          <li>
+            <strong>{gameResponse.game.away_team}:</strong>{" "}
+            {gameResponse.game.away_top_projected_scorer
+              ? `${gameResponse.game.away_top_projected_scorer.player_name} (${(gameResponse.game.away_top_projected_scorer.model_probability * 100).toFixed(1)}%)`
+              : "Projection unavailable"}
+          </li>
+          <li>
+            <strong>{gameResponse.game.home_team}:</strong>{" "}
+            {gameResponse.game.home_top_projected_scorer
+              ? `${gameResponse.game.home_top_projected_scorer.player_name} (${(gameResponse.game.home_top_projected_scorer.model_probability * 100).toFixed(1)}%)`
+              : "Projection unavailable"}
+          </li>
+        </ul>
+      </section>
+
+      <section className="card stack-gap">
+        <h2>Top 3 value picks for this game</h2>
         {topBets.length === 0 ? (
-          <p className="empty-state">No top bets available for this game.</p>
+          <p className="empty-state">No value picks available yet for this game. Check back after projections and odds are both posted.</p>
         ) : (
           <table className="bets-table">
             <thead>
@@ -84,21 +112,6 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
               ))}
             </tbody>
           </table>
-        )}
-      </section>
-
-      <section className="card stack-gap">
-        <h2>Additional candidate players</h2>
-        {candidatePlayers.length === 0 ? (
-          <p className="empty-state">No additional players for this game yet.</p>
-        ) : (
-          <ul className="candidate-list">
-            {candidatePlayers.map((bet) => (
-              <li key={bet.player_id}>
-                <strong>{bet.player_name}</strong> · Model {(bet.model_probability * 100).toFixed(1)}% · Fair +{bet.fair_odds} · Market +{bet.market_odds} · Edge {(bet.edge * 100).toFixed(1)}% · EV {(bet.ev * 100).toFixed(1)}% · Confidence {bet.confidence_tag ?? "-"}
-              </li>
-            ))}
-          </ul>
         )}
       </section>
     </main>
