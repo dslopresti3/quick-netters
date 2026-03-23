@@ -1,6 +1,6 @@
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
-from app.api.routes import get_daily_recommendations, get_game_recommendations, get_games
+from app.api.routes import get_daily_recommendations, get_date_availability, get_game_recommendations, get_games
 from app.api.schemas import GameSummary
 from app.services.interfaces import OddsProvider, ProjectionProvider, ScheduleProvider
 from app.services.mock_services import ValueRecommendationService
@@ -132,3 +132,103 @@ def test_daily_recommendations_route_integrates_with_live_odds_provider() -> Non
 
     assert payload.odds_available is True
     assert payload.recommendations[0].market_odds == 250
+
+
+class EmptyScheduleProvider(ScheduleProvider):
+    def fetch(self, selected_date: date) -> list[GameSummary]:
+        return []
+
+
+class EmptyProjectionProvider(ProjectionProvider):
+    def fetch_player_first_goal_projections(self, selected_date: date) -> list[tuple[str, str, str, str, float]]:
+        return []
+
+
+class EmptyOddsProvider(OddsProvider):
+    def fetch_player_first_goal_odds(self, selected_date: date) -> list[NormalizedPlayerOdds]:
+        return []
+
+
+def _registry_with(
+    schedule_provider: ScheduleProvider,
+    projection_provider: ProjectionProvider,
+    odds_provider: OddsProvider,
+) -> ProviderRegistry:
+    return ProviderRegistry(
+        schedule_provider=schedule_provider,
+        projection_provider=projection_provider,
+        odds_provider=odds_provider,
+        recommendation_service=ValueRecommendationService(
+            schedule_provider=schedule_provider,
+            projection_provider=projection_provider,
+            odds_provider=odds_provider,
+        ),
+    )
+
+
+def test_date_availability_invalid_by_product_rule() -> None:
+    selected_date = date.today() + timedelta(days=2)
+
+    payload = get_date_availability(date=selected_date, providers=_provider_registry())
+
+    assert payload.status == "invalid_date"
+    assert payload.valid_by_product_rule is False
+    assert payload.schedule_available is False
+
+
+def test_date_availability_valid_with_no_schedule() -> None:
+    selected_date = date.today()
+    providers = _registry_with(
+        schedule_provider=EmptyScheduleProvider(),
+        projection_provider=StubProjectionProvider(),
+        odds_provider=StubOddsProvider(),
+    )
+
+    payload = get_date_availability(date=selected_date, providers=providers)
+
+    assert payload.status == "no_schedule"
+    assert payload.valid_by_product_rule is True
+    assert payload.schedule_available is False
+
+
+def test_date_availability_valid_with_schedule_missing_projections() -> None:
+    selected_date = date.today()
+    providers = _registry_with(
+        schedule_provider=StubScheduleProvider(),
+        projection_provider=EmptyProjectionProvider(),
+        odds_provider=StubOddsProvider(),
+    )
+
+    payload = get_date_availability(date=selected_date, providers=providers)
+
+    assert payload.status == "missing_projections"
+    assert payload.schedule_available is True
+    assert payload.projections_available is False
+
+
+def test_date_availability_valid_with_schedule_and_projections_missing_odds() -> None:
+    selected_date = date.today()
+    providers = _registry_with(
+        schedule_provider=StubScheduleProvider(),
+        projection_provider=StubProjectionProvider(),
+        odds_provider=EmptyOddsProvider(),
+    )
+
+    payload = get_date_availability(date=selected_date, providers=providers)
+
+    assert payload.status == "missing_odds"
+    assert payload.schedule_available is True
+    assert payload.projections_available is True
+    assert payload.odds_available is False
+
+
+def test_date_availability_ready_when_all_data_is_available() -> None:
+    selected_date = date.today()
+
+    payload = get_date_availability(date=selected_date, providers=_provider_registry())
+
+    assert payload.status == "ready"
+    assert payload.valid_by_product_rule is True
+    assert payload.schedule_available is True
+    assert payload.projections_available is True
+    assert payload.odds_available is True
