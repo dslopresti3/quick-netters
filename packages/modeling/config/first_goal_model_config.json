@@ -1,7 +1,10 @@
 {
   "season_weights": {
     "last_season": 0.75,
-    "current_season": 1.0
+    "current_season": 1.0,
+    "early_season_last_season_multiplier": 1.2,
+    "early_season_current_season_multiplier": 0.8,
+    "in_season_ramp_games": 30
   },
   "rolling_windows": {
     "team_games": 15,
@@ -16,7 +19,8 @@
   },
   "shrinkage": {
     "team_prior_strength": 20.0,
-    "player_prior_strength": 12.0
+    "player_prior_strength": 12.0,
+    "player_current_baseline_games": 10
   },
   "home_away": {
     "enabled": true,

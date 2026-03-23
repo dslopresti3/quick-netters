@@ -9,6 +9,9 @@ from pathlib import Path
 class SeasonWeights:
     last_season: float = 0.7
     current_season: float = 1.0
+    early_season_last_season_multiplier: float = 1.2
+    early_season_current_season_multiplier: float = 0.8
+    in_season_ramp_games: int = 30
 
 
 @dataclass(slots=True)
@@ -30,6 +33,7 @@ class MinimumSampleConfig:
 class ShrinkageConfig:
     team_prior_strength: float = 20.0
     player_prior_strength: float = 12.0
+    player_current_baseline_games: int = 10
 
 
 @dataclass(slots=True)
