@@ -25,7 +25,7 @@ def test_map_schedule_payload_maps_games_into_internal_schema() -> None:
         ]
     }
 
-    games = _map_schedule_payload(payload)
+    games = _map_schedule_payload(payload, selected_date=date(2026, 3, 23))
 
     assert len(games) == 1
     assert games[0].game_id == "2025020001"
@@ -43,9 +43,31 @@ def test_map_schedule_payload_returns_empty_for_no_games_or_malformed_rows() -> 
         ]
     }
 
-    games = _map_schedule_payload(payload)
+    games = _map_schedule_payload(payload, selected_date=date(2026, 3, 23))
 
     assert games == []
+
+
+def test_map_schedule_payload_supports_top_level_games_shape() -> None:
+    payload = {
+        "games": [
+            {
+                "id": 2026020001,
+                "gameDate": "2026-03-23",
+                "startTimeUTC": "2026-03-23T23:00:00Z",
+                "gameState": "FUT",
+                "awayTeam": {"commonName": {"default": "Canadiens"}},
+                "homeTeam": {"commonName": {"default": "Maple Leafs"}},
+            }
+        ]
+    }
+
+    games = _map_schedule_payload(payload, selected_date=date(2026, 3, 23))
+
+    assert len(games) == 1
+    assert games[0].game_id == "2026020001"
+    assert games[0].away_team == "Canadiens"
+    assert games[0].home_team == "Maple Leafs"
 
 
 def test_schedule_provider_returns_empty_when_upstream_fails() -> None:
