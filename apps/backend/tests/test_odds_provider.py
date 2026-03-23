@@ -1,6 +1,15 @@
 from datetime import date, datetime, timedelta, timezone
 
-from app.services.odds_provider import TheOddsApiAdapter
+from app.services.odds_provider import TheOddsApiAdapter, TheOddsApiClient
+
+
+def test_the_odds_api_client_uses_the_odds_api_key_fallback_env(monkeypatch) -> None:
+    monkeypatch.delenv("ODDS_API_KEY", raising=False)
+    monkeypatch.setenv("THE_ODDS_API_KEY", "fallback-key")
+
+    client = TheOddsApiClient()
+
+    assert client._api_key == "fallback-key"
 
 
 def test_the_odds_api_adapter_normalizes_rows_into_internal_schema() -> None:
