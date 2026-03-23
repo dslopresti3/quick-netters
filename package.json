@@ -1,0 +1,12 @@
+{
+  "name": "quick-netters",
+  "private": true,
+  "workspaces": [
+    "apps/frontend"
+  ],
+  "scripts": {
+    "dev:frontend": "npm --workspace apps/frontend run dev",
+    "build:frontend": "npm --workspace apps/frontend run build",
+    "lint:frontend": "npm --workspace apps/frontend run lint"
+  }
+}
