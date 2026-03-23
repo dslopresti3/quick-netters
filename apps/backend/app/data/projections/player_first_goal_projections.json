@@ -4,60 +4,60 @@
     {
       "date": "2026-03-23",
       "game_id": "2025021119",
-      "player_id": "p-away-connor-bedard",
-      "player_name": "Connor Bedard",
-      "team": "Blackhawks",
-      "team_name": "Blackhawks",
-      "probability": 0.14,
-      "model_probability": 0.14
+      "player_id": "p-away-brady-tkachuk",
+      "player_name": "Brady Tkachuk",
+      "team": "Senators",
+      "team_name": "Senators",
+      "probability": 0.16,
+      "model_probability": 0.16
     },
     {
       "date": "2026-03-23",
       "game_id": "2025021119",
-      "player_id": "p-away-teuvo-teravainen",
-      "player_name": "Teuvo Teravainen",
-      "team": "Blackhawks",
-      "team_name": "Blackhawks",
-      "probability": 0.1,
-      "model_probability": 0.1
-    },
-    {
-      "date": "2026-03-23",
-      "game_id": "2025021119",
-      "player_id": "p-away-tyler-bertuzzi",
-      "player_name": "Tyler Bertuzzi",
-      "team": "Blackhawks",
-      "team_name": "Blackhawks",
-      "probability": 0.09,
-      "model_probability": 0.09
-    },
-    {
-      "date": "2026-03-23",
-      "game_id": "2025021119",
-      "player_id": "p-home-kirill-kaprizov",
-      "player_name": "Kirill Kaprizov",
-      "team": "Wild",
-      "team_name": "Wild",
-      "probability": 0.17,
-      "model_probability": 0.17
-    },
-    {
-      "date": "2026-03-23",
-      "game_id": "2025021119",
-      "player_id": "p-home-matt-boldy",
-      "player_name": "Matt Boldy",
-      "team": "Wild",
-      "team_name": "Wild",
+      "player_id": "p-away-tim-stutzle",
+      "player_name": "Tim Stutzle",
+      "team": "Senators",
+      "team_name": "Senators",
       "probability": 0.12,
       "model_probability": 0.12
     },
     {
       "date": "2026-03-23",
       "game_id": "2025021119",
-      "player_id": "p-home-mats-zuccarello",
-      "player_name": "Mats Zuccarello",
-      "team": "Wild",
-      "team_name": "Wild",
+      "player_id": "p-away-drake-batherson",
+      "player_name": "Drake Batherson",
+      "team": "Senators",
+      "team_name": "Senators",
+      "probability": 0.09,
+      "model_probability": 0.09
+    },
+    {
+      "date": "2026-03-23",
+      "game_id": "2025021119",
+      "player_id": "p-home-artemi-panarin",
+      "player_name": "Artemi Panarin",
+      "team": "Rangers",
+      "team_name": "Rangers",
+      "probability": 0.15,
+      "model_probability": 0.15
+    },
+    {
+      "date": "2026-03-23",
+      "game_id": "2025021119",
+      "player_id": "p-home-mika-zibanejad",
+      "player_name": "Mika Zibanejad",
+      "team": "Rangers",
+      "team_name": "Rangers",
+      "probability": 0.11,
+      "model_probability": 0.11
+    },
+    {
+      "date": "2026-03-23",
+      "game_id": "2025021119",
+      "player_id": "p-home-chris-kreider",
+      "player_name": "Chris Kreider",
+      "team": "Rangers",
+      "team_name": "Rangers",
       "probability": 0.08,
       "model_probability": 0.08
     }
