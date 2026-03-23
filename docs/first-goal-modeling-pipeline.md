@@ -1,37 +1,46 @@
-# First-goal modeling pipeline (NHL)
+# First-goal modeling pipeline (NHL, v1)
 
-This pipeline estimates first-goal scorer probabilities in two interpretable layers:
+This pipeline estimates first-goal scorer probabilities in two layers:
 
-1. **Team layer**: `P(team scores first)`
-2. **Player layer**: `P(player scores first for team | team scores first)`
+1. `P(team scores first)`
+2. `P(player scores first for team | team scores first)`
 
-Final score:
+Final output per player:
 
-`P(player scores first) = P(team scores first) * P(player scores first | team scores first)`
+`P(player scores first) = P(team scores first) * P(player | team first)`
 
 ## Implementation
 
-Code lives in `packages/modeling/src/quick_netters_modeling/first_goal/`.
+Code location: `packages/modeling/src/quick_netters_modeling/first_goal/`
 
-- `config.py`: model settings dataclasses + JSON loader.
-- `schemas.py`: typed inputs and outputs.
-- `pipeline.py`: estimation logic with season weighting, rolling windows, shrinkage, and optional lineup/TOI adjustments.
-- `io.py`: CSV/JSON prediction writers.
+- `config.py`: config dataclasses + JSON loader.
+- `schemas.py`: typed input/output contracts.
+- `pipeline.py`: stable v1 estimators (empirical rates + config-driven blending/shrinkage).
+- `io.py`: CSV/JSON output writers.
 
-A default config template is included at `packages/modeling/config/first_goal_model_config.json`.
+Default config: `packages/modeling/config/first_goal_model_config.json`
 
-## Inputs
+## v1 behavior (config-driven)
 
-The pipeline expects:
+- **Seasons**: supports last season + current season by weighting each row via `season_weights`.
+- **Team layer**:
+  - long-window weighted rate,
+  - recent-window weighted rate,
+  - blend by `rolling_windows.team_recent_weight`,
+  - shrink toward league baseline with `shrinkage.team_prior_strength`,
+  - optional home/away adjustment.
+- **Player layer**:
+  - long/recent weighted player first-goal counts,
+  - team and player minimum-sample guards,
+  - shrink toward lineup prior using `shrinkage.player_prior_strength`,
+  - prior is TOI-based when enabled, otherwise uniform lineup prior.
 
-- historical `TeamGameSample` rows covering last season + current season,
-- historical `PlayerGameSample` rows covering last season + current season,
-- `ScheduledGame` rows to score,
-- `ScheduledLineupPlayer` rows to constrain/weight players.
+## Outputs
 
-## Design choices
+Predictions are structured per scheduled game and player, including:
 
-- **Interpretable and stable**: empirical rates with explicit shrinkage and recency blending.
-- **Configurable season weighting** for last/current season balance.
-- **Configurable small-sample behavior** via minimum thresholds and prior strengths.
-- **Modular**: each layer can be replaced later (e.g., logistic regression or Bayesian hierarchy) without changing output contracts.
+- team first-goal probability,
+- player conditional share,
+- final player first-goal probability.
+
+This keeps the implementation interpretable and stable while leaving clear extension points for future model upgrades.
