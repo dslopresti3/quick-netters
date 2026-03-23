@@ -114,6 +114,28 @@ def test_store_validation_rejects_duplicate_rows(tmp_path) -> None:
         store.load_for_date(date(2026, 3, 23))
 
 
+def test_store_backed_provider_returns_empty_when_artifact_is_invalid(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {
+                "date": "2026-03-23",
+                "game_id": "g-1",
+                "player_id": "p-1",
+                "player_name": "Player One",
+                "team_name": "Team One",
+                "model_probability": 2.0,
+            }
+        ],
+    )
+    provider = StoreBackedProjectionProvider(store=JsonArtifactProjectionStore(artifact))
+
+    rows = provider.fetch_player_first_goal_projections(date(2026, 3, 23))
+
+    assert rows == []
+
+
 def test_recommendation_routes_integrate_with_store_backed_projections(tmp_path) -> None:
     artifact = tmp_path / "projections.json"
     _write_artifact(
@@ -199,6 +221,84 @@ def test_attach_top_projected_scorers_preserves_games_when_projections_missing(t
     assert games_by_id["g-col-vs-dal"].home_top_projected_scorer is None
     assert games_by_id["g-nyr-vs-bos"].away_top_projected_scorer is not None
     assert games_by_id["g-nyr-vs-bos"].home_top_projected_scorer is not None
+
+
+def test_attach_top_projected_scorers_attaches_highest_probability_per_team(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {
+                "date": "2026-03-23",
+                "game_id": "g-nyr-vs-bos",
+                "player_id": "p-away-second",
+                "player_name": "Away Second",
+                "team_name": "NY Rangers",
+                "model_probability": 0.15,
+            },
+            {
+                "date": "2026-03-23",
+                "game_id": "g-nyr-vs-bos",
+                "player_id": "p-away-top",
+                "player_name": "Away Top",
+                "team_name": "NY Rangers",
+                "model_probability": 0.33,
+            },
+            {
+                "date": "2026-03-23",
+                "game_id": "g-nyr-vs-bos",
+                "player_id": "p-home-top",
+                "player_name": "Home Top",
+                "team_name": "Boston Bruins",
+                "model_probability": 0.41,
+            },
+        ],
+    )
+
+    schedule_provider = MockGamesService()
+    projection_provider = StoreBackedProjectionProvider(store=JsonArtifactProjectionStore(artifact))
+    odds_provider = EmptyOddsProvider()
+    service = ValueRecommendationService(
+        schedule_provider=schedule_provider,
+        projection_provider=projection_provider,
+        odds_provider=odds_provider,
+    )
+
+    games = schedule_provider.fetch(date(2026, 3, 23))
+    enriched_games = service.attach_top_projected_scorers(date(2026, 3, 23), games)
+    games_by_id = {game.game_id: game for game in enriched_games}
+
+    assert len(enriched_games) == 3
+    assert games_by_id["g-nyr-vs-bos"].away_top_projected_scorer is not None
+    assert games_by_id["g-nyr-vs-bos"].away_top_projected_scorer.player_id == "p-away-top"
+    assert games_by_id["g-nyr-vs-bos"].home_top_projected_scorer is not None
+    assert games_by_id["g-nyr-vs-bos"].home_top_projected_scorer.player_id == "p-home-top"
+
+
+def test_games_stay_visible_when_no_projection_rows_exist_for_date(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(artifact, [])
+
+    schedule_provider = MockGamesService()
+    projection_provider = StoreBackedProjectionProvider(store=JsonArtifactProjectionStore(artifact))
+    odds_provider = EmptyOddsProvider()
+    registry = ProviderRegistry(
+        schedule_provider=schedule_provider,
+        projection_provider=projection_provider,
+        odds_provider=odds_provider,
+        recommendation_service=ValueRecommendationService(
+            schedule_provider=schedule_provider,
+            projection_provider=projection_provider,
+            odds_provider=odds_provider,
+        ),
+    )
+
+    payload = get_games(date=date(2026, 3, 23), providers=registry)
+
+    assert len(payload.games) == 3
+    assert payload.projections_available is False
+    assert all(game.away_top_projected_scorer is None for game in payload.games)
+    assert all(game.home_top_projected_scorer is None for game in payload.games)
 
 
 def test_projection_availability_false_when_rows_are_invalid_or_unmatched() -> None:

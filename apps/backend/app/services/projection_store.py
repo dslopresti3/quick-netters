@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from datetime import date
@@ -8,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from app.services.interfaces import ProjectionProvider
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -54,7 +57,14 @@ class StoreBackedProjectionProvider(ProjectionProvider):
         self._store = store
 
     def fetch_player_first_goal_projections(self, selected_date: date) -> list[tuple[str, str, str, str, float]]:
-        rows = self._store.load_for_date(selected_date)
+        try:
+            rows = self._store.load_for_date(selected_date)
+        except ProjectionStoreValidationError as exc:
+            logger.warning(
+                "Projection artifact validation failed; treating date as unavailable",
+                extra={"selected_date": selected_date.isoformat(), "error": str(exc)},
+            )
+            return []
         return [
             (row.game_id, row.player_id, row.player_name, row.team_name, row.model_probability)
             for row in rows
@@ -64,16 +74,32 @@ class StoreBackedProjectionProvider(ProjectionProvider):
 _PROJECTED_ROOT = Path(__file__).resolve().parents[1] / "data" / "projections"
 
 
+@dataclass(frozen=True)
+class ProjectionArtifactDataSource:
+    """Structured projection artifact path resolution independent of route logic."""
+
+    artifact_path: Path
+
+    @staticmethod
+    def real_from_env() -> "ProjectionArtifactDataSource":
+        raw_path = os.getenv("BACKEND_PROJECTION_ARTIFACT_PATH")
+        if isinstance(raw_path, str) and raw_path.strip():
+            return ProjectionArtifactDataSource(artifact_path=Path(raw_path.strip()))
+        return ProjectionArtifactDataSource(artifact_path=_PROJECTED_ROOT / "player_first_goal_projections.json")
+
+    @staticmethod
+    def mock_default() -> "ProjectionArtifactDataSource":
+        return ProjectionArtifactDataSource(artifact_path=_PROJECTED_ROOT / "mock_player_first_goal_projections.json")
+
+
 def build_real_projection_provider_from_env() -> StoreBackedProjectionProvider:
-    artifact_path = os.getenv("BACKEND_PROJECTION_ARTIFACT_PATH") or str(
-        _PROJECTED_ROOT / "player_first_goal_projections.json"
-    )
-    return StoreBackedProjectionProvider(store=JsonArtifactProjectionStore(artifact_path=artifact_path))
+    projection_source = ProjectionArtifactDataSource.real_from_env()
+    return StoreBackedProjectionProvider(store=JsonArtifactProjectionStore(artifact_path=projection_source.artifact_path))
 
 
 def build_mock_projection_provider() -> StoreBackedProjectionProvider:
-    artifact_path = str(_PROJECTED_ROOT / "mock_player_first_goal_projections.json")
-    return StoreBackedProjectionProvider(store=JsonArtifactProjectionStore(artifact_path=artifact_path))
+    projection_source = ProjectionArtifactDataSource.mock_default()
+    return StoreBackedProjectionProvider(store=JsonArtifactProjectionStore(artifact_path=projection_source.artifact_path))
 
 
 def _parse_projection_payload(payload: dict[str, Any], selected_date: date) -> list[PlayerFirstGoalProjectionRow]:
