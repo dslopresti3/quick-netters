@@ -4,11 +4,138 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; background: #f4f6fb; color: #1f2937; }
-.page { max-width: 960px; margin: 0 auto; padding: 2rem 1rem 3rem; }
-.subtitle { margin-top: 0.5rem; color: #4b5563; }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
-.card { background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1rem; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06); }
-.card h3 { margin: 0 0 0.5rem; }
-.card ul { margin: 0; padding-left: 1rem; color: #374151; }
-.tag { display: inline-block; background: #eef2ff; color: #3730a3; border-radius: 999px; padding: 0.2rem 0.6rem; font-size: 0.8rem; margin-top: 0.75rem; }
+
+body {
+  margin: 0;
+  background: #f4f6fb;
+  color: #1f2937;
+}
+
+.page {
+  max-width: 1024px;
+  margin: 0 auto;
+  padding: 2rem 1rem 3rem;
+}
+
+h1, h2, h3 { margin: 0; }
+
+.subtitle {
+  margin-top: 0.5rem;
+  color: #4b5563;
+}
+
+.stack-gap > * + * { margin-top: 0.9rem; }
+.stack-gap-sm > * + * { margin-top: 0.5rem; }
+.stack-gap-lg > * + * { margin-top: 1.4rem; }
+
+.card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 1rem;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
+}
+
+.date-picker-form {
+  display: flex;
+  gap: 0.75rem;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.date-picker-form input,
+.date-picker-form button {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.95rem;
+}
+
+.date-picker-form button {
+  cursor: pointer;
+  background: #1d4ed8;
+  color: white;
+  border-color: #1d4ed8;
+}
+
+.date-picker-form button[disabled] {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.helper-text {
+  color: #6b7280;
+  margin: 0;
+}
+
+.secondary-link {
+  color: #1d4ed8;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.pick-list,
+.candidate-list {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.game-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.game-card-link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
+.team-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0.8rem 0;
+}
+
+.team-grid dt {
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+
+.team-grid dd {
+  margin: 0.15rem 0;
+}
+
+.metric-line {
+  margin: 0.2rem 0;
+  color: #374151;
+}
+
+.empty-state {
+  margin: 0;
+  color: #6b7280;
+}
+
+.bets-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.bets-table th,
+.bets-table td {
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 0.6rem 0.45rem;
+}
+
+@media (max-width: 760px) {
+  .bets-table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+}

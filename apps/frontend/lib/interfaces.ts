@@ -1,27 +1,39 @@
-export interface ScheduleMatch {
+export interface TeamFirstGoalProjection {
+  team: string;
+  topScorer: string;
+  fairProbability: number;
+}
+
+export interface GameSlateCard {
   id: string;
-  tournament: string;
-  playerA: string;
-  playerB: string;
+  date: string;
+  league: string;
   startTimeUtc: string;
+  awayTeam: TeamFirstGoalProjection;
+  homeTeam: TeamFirstGoalProjection;
+  marketOdds: string;
+  edge: string;
 }
 
-export interface PlayerProjection {
+export interface ValuePick {
+  gameId: string;
   player: string;
-  holdPct: number;
-  breakPct: number;
-  fitnessScore: number;
+  team: string;
+  modelProbability: number;
+  fairOdds: string;
+  marketOdds: string;
+  edge: string;
 }
 
-export interface MatchOdds {
-  matchId: string;
-  sportsbook: string;
-  playerA: number;
-  playerB: number;
+export interface PlayerBet extends ValuePick {
+  confidenceTier: "high" | "medium" | "watch";
 }
 
-export interface Recommendation {
-  matchId: string;
-  confidence: number;
-  rationale: string;
+export interface GameDetail {
+  gameId: string;
+  date: string;
+  matchup: string;
+  startTimeUtc: string;
+  topBets: PlayerBet[];
+  candidatePlayers: PlayerBet[];
 }
