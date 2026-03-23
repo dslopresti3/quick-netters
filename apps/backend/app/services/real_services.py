@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime, timezone
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -10,6 +11,8 @@ from app.api.schemas import GameSummary
 from app.services.interfaces import OddsProvider, ProjectionProvider, ScheduleProvider
 from app.services.odds import NormalizedPlayerOdds
 
+logger = logging.getLogger(__name__)
+
 
 class NhlScheduleProvider(ScheduleProvider):
     """Fetch NHL schedule data from the official public NHL API."""
@@ -18,34 +21,83 @@ class NhlScheduleProvider(ScheduleProvider):
 
     def fetch(self, selected_date: date) -> list[GameSummary]:
         url = f"{self.base_url}/{selected_date.isoformat()}"
+        logger.info("Fetching NHL schedule", extra={"selected_date": selected_date.isoformat(), "url": url})
         try:
             with urlopen(url, timeout=10) as response:
                 payload = json.load(response)
-        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
+                logger.info(
+                    "NHL upstream raw schedule response",
+                    extra={"selected_date": selected_date.isoformat(), "raw_payload": payload},
+                )
+        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+            logger.warning(
+                "NHL schedule fetch failed",
+                extra={"selected_date": selected_date.isoformat(), "url": url, "error": str(exc)},
+            )
             return []
 
-        return _map_schedule_payload(payload)
+        return _map_schedule_payload(payload, selected_date=selected_date)
 
 
-def _map_schedule_payload(payload: dict[str, Any]) -> list[GameSummary]:
+def _map_schedule_payload(payload: dict[str, Any], selected_date: date | None = None) -> list[GameSummary]:
+    extracted_games = _extract_games(payload)
+    logger.info("Extracted upstream games before filtering", extra={"games": extracted_games})
+
+    if selected_date is not None:
+        target_date = selected_date.isoformat()
+        date_filtered_games = [game for game in extracted_games if _matches_selected_date(game, target_date)]
+        logger.info(
+            "Extracted upstream games after date filtering",
+            extra={
+                "selected_date": target_date,
+                "total_extracted_games": len(extracted_games),
+                "games_matching_date": len(date_filtered_games),
+            },
+        )
+    else:
+        date_filtered_games = extracted_games
+
     game_summaries: list[GameSummary] = []
-    game_weeks = payload.get("gameWeek")
-    if not isinstance(game_weeks, list):
-        return []
+    for game in date_filtered_games:
+        summary = _map_game(game)
+        if summary is not None:
+            game_summaries.append(summary)
 
-    for week in game_weeks:
-        if not isinstance(week, dict):
-            continue
-        games = week.get("games")
-        if not isinstance(games, list):
-            continue
-
-        for game in games:
-            summary = _map_game(game)
-            if summary is not None:
-                game_summaries.append(summary)
+    logger.info("Final mapped internal game objects", extra={"mapped_games": [game.model_dump(mode="json") for game in game_summaries]})
 
     return game_summaries
+
+
+def _extract_games(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    game_weeks = payload.get("gameWeek")
+    if isinstance(game_weeks, list):
+        extracted: list[dict[str, Any]] = []
+        for week in game_weeks:
+            if not isinstance(week, dict):
+                continue
+            games = week.get("games")
+            if not isinstance(games, list):
+                continue
+            extracted.extend(game for game in games if isinstance(game, dict))
+        return extracted
+
+    games = payload.get("games")
+    if isinstance(games, list):
+        return [game for game in games if isinstance(game, dict)]
+
+    return []
+
+
+def _matches_selected_date(game: dict[str, Any], selected_date_iso: str) -> bool:
+    game_date = game.get("gameDate")
+    if isinstance(game_date, str):
+        return game_date == selected_date_iso
+
+    start_time_utc = game.get("startTimeUTC")
+    if isinstance(start_time_utc, str) and len(start_time_utc) >= 10:
+        return start_time_utc[:10] == selected_date_iso
+
+    return False
 
 
 def _map_game(game: dict[str, Any]) -> GameSummary | None:
