@@ -1,9 +1,12 @@
 import json
 from datetime import date
+from datetime import datetime
+from datetime import timezone
 
 import pytest
 
 from app.api.routes import get_games
+from app.api.schemas import GameSummary
 from app.services.projection_store import (
     JsonArtifactProjectionStore,
     ProjectionStoreValidationError,
@@ -299,6 +302,84 @@ def test_games_stay_visible_when_no_projection_rows_exist_for_date(tmp_path) -> 
     assert payload.projections_available is False
     assert all(game.away_top_projected_scorer is None for game in payload.games)
     assert all(game.home_top_projected_scorer is None for game in payload.games)
+
+
+def test_store_backed_projection_artifact_attaches_team_leaders_for_game_2025021119(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {
+                "date": "2026-03-23",
+                "game_id": "2025021119",
+                "player_id": "p-away-top",
+                "player_name": "Away Top",
+                "team_name": "Blackhawks",
+                "model_probability": 0.26,
+            },
+            {
+                "date": "2026-03-23",
+                "game_id": "2025021119",
+                "player_id": "p-away-secondary",
+                "player_name": "Away Secondary",
+                "team_name": "Blackhawks",
+                "model_probability": 0.13,
+            },
+            {
+                "date": "2026-03-23",
+                "game_id": "2025021119",
+                "player_id": "p-home-top",
+                "player_name": "Home Top",
+                "team_name": "Wild",
+                "model_probability": 0.31,
+            },
+            {
+                "date": "2026-03-23",
+                "game_id": "2025021119",
+                "player_id": "p-home-secondary",
+                "player_name": "Home Secondary",
+                "team_name": "Wild",
+                "model_probability": 0.18,
+            },
+        ],
+    )
+
+    class _SingleGameScheduleProvider:
+        def fetch(self, selected_date: date) -> list[GameSummary]:
+            if selected_date != date(2026, 3, 23):
+                return []
+            return [
+                GameSummary(
+                    game_id="2025021119",
+                    game_time=datetime(2026, 3, 23, 23, 0, tzinfo=timezone.utc),
+                    away_team="Blackhawks",
+                    home_team="Wild",
+                    status="FUT",
+                )
+            ]
+
+    schedule_provider = _SingleGameScheduleProvider()
+    projection_provider = StoreBackedProjectionProvider(store=JsonArtifactProjectionStore(artifact))
+    odds_provider = EmptyOddsProvider()
+    registry = ProviderRegistry(
+        schedule_provider=schedule_provider,
+        projection_provider=projection_provider,
+        odds_provider=odds_provider,
+        recommendation_service=ValueRecommendationService(
+            schedule_provider=schedule_provider,
+            projection_provider=projection_provider,
+            odds_provider=odds_provider,
+        ),
+    )
+
+    payload = get_games(date=date(2026, 3, 23), providers=registry)
+
+    assert payload.projections_available is True
+    assert len(payload.games) == 1
+    assert payload.games[0].away_top_projected_scorer is not None
+    assert payload.games[0].away_top_projected_scorer.player_id == "p-away-top"
+    assert payload.games[0].home_top_projected_scorer is not None
+    assert payload.games[0].home_top_projected_scorer.player_id == "p-home-top"
 
 
 def test_projection_availability_false_when_rows_are_invalid_or_unmatched() -> None:
