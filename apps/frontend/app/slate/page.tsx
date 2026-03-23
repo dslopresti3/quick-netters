@@ -1,6 +1,12 @@
 import Link from "next/link";
 import { DatePickerForm } from "../../components/date-picker-form";
-import { fetchSlateByDate, fetchTopPicksByDate, getAllowedDateBounds, getDefaultDate, isAllowedDate } from "../../lib/mock-api";
+import {
+  fetchDailyRecommendationsByDate,
+  fetchGamesByDate,
+  getAllowedDateBounds,
+  getDefaultDate,
+  isAllowedDate,
+} from "../../lib/mock-api";
 
 type SlatePageProps = {
   searchParams?: {
@@ -26,13 +32,16 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
     );
   }
 
-  const [games, valuePicks] = await Promise.all([fetchSlateByDate(selectedDate), fetchTopPicksByDate(selectedDate)]);
+  const [gamesResponse, dailyRecommendations] = await Promise.all([
+    fetchGamesByDate(selectedDate),
+    fetchDailyRecommendationsByDate(selectedDate),
+  ]);
 
   return (
     <main className="page stack-gap-lg">
       <header>
         <h1>Daily Slate</h1>
-        <p className="subtitle">{selectedDate} · Mock data only</p>
+        <p className="subtitle">{selectedDate} · API-backed mock data</p>
       </header>
 
       <section className="card stack-gap">
@@ -41,14 +50,14 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
       </section>
 
       <section className="card stack-gap">
-        <h2>Top 3 overall value picks</h2>
-        {valuePicks.length === 0 ? (
+        <h2>Top daily recommendations</h2>
+        {dailyRecommendations.recommendations.length === 0 ? (
           <p className="empty-state">No value picks available for {selectedDate}. Check back later.</p>
         ) : (
           <ol className="pick-list">
-            {valuePicks.slice(0, 3).map((pick) => (
-              <li key={`${pick.gameId}-${pick.player}`}>
-                <strong>{pick.player}</strong> ({pick.team}) · Model {(pick.modelProbability * 100).toFixed(1)}% · Fair {pick.fairOdds} · {pick.marketOdds} · {pick.edge}
+            {dailyRecommendations.recommendations.slice(0, 3).map((pick) => (
+              <li key={`${pick.game_id}-${pick.player_id}`}>
+                <strong>{pick.player_name}</strong> · Model {(pick.model_probability * 100).toFixed(1)}% · Fair +{pick.fair_odds} · Market +{pick.market_odds} · Edge {(pick.edge * 100).toFixed(1)}% · EV {(pick.ev * 100).toFixed(1)}%
               </li>
             ))}
           </ol>
@@ -57,32 +66,16 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
 
       <section>
         <h2>Games</h2>
-        {games.length === 0 ? (
+        {gamesResponse.games.length === 0 ? (
           <article className="card">
             <p className="empty-state">No games on the slate for this date yet.</p>
           </article>
         ) : (
           <div className="game-grid">
-            {games.map((game) => (
-              <Link href={`/games/${game.id}?date=${selectedDate}`} key={game.id} className="card game-card-link">
-                <p className="helper-text">{game.league} · {new Date(game.startTimeUtc).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" })} UTC</p>
-                <h3>{game.awayTeam.team} @ {game.homeTeam.team}</h3>
-
-                <dl className="team-grid">
-                  <div>
-                    <dt>Away top scorer</dt>
-                    <dd>{game.awayTeam.topScorer}</dd>
-                    <dd>Fair probability {(game.awayTeam.fairProbability * 100).toFixed(1)}%</dd>
-                  </div>
-                  <div>
-                    <dt>Home top scorer</dt>
-                    <dd>{game.homeTeam.topScorer}</dd>
-                    <dd>Fair probability {(game.homeTeam.fairProbability * 100).toFixed(1)}%</dd>
-                  </div>
-                </dl>
-
-                <p className="metric-line">Market odds: {game.marketOdds}</p>
-                <p className="metric-line">Edge: {game.edge}</p>
+            {gamesResponse.games.map((game) => (
+              <Link href={`/games/${game.game_id}?date=${selectedDate}`} key={game.game_id} className="card game-card-link">
+                <p className="helper-text">{new Date(game.game_time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" })} UTC</p>
+                <h3>{game.away_team} @ {game.home_team}</h3>
               </Link>
             ))}
           </div>

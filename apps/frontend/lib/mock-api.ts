@@ -1,50 +1,65 @@
-import { ALLOWED_DATES, mockDetailsByGameAndDate, mockSlateByDate, mockTopPicksByDate } from "./mock-data";
-import type { GameDetail, GameSlateCard, ValuePick } from "./interfaces";
+import type { DailyRecommendationsResponse, GameRecommendationsResponse, GamesResponse } from "./interfaces";
 
-const SIMULATED_LATENCY_MS = 400;
+const API_BASE_URL = process.env.API_BASE_URL ?? "http://127.0.0.1:8000";
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const formatDate = (date: Date): string => date.toISOString().slice(0, 10);
 
-export function isAllowedDate(date: string): boolean {
-  return date === ALLOWED_DATES.today || date === ALLOWED_DATES.tomorrow;
-}
+const today = new Date();
+const tomorrow = new Date(today);
+tomorrow.setDate(today.getDate() + 1);
 
 export function getDefaultDate(): string {
-  return ALLOWED_DATES.today;
+  return formatDate(today);
 }
 
 export function getAllowedDateBounds() {
-  return { min: ALLOWED_DATES.today, max: ALLOWED_DATES.tomorrow };
+  return { min: formatDate(today), max: formatDate(tomorrow) };
 }
 
-export async function fetchSlateByDate(date: string): Promise<GameSlateCard[]> {
-  await sleep(SIMULATED_LATENCY_MS);
+export function isAllowedDate(date: string): boolean {
+  const { min, max } = getAllowedDateBounds();
+  return date === min || date === max;
+}
 
-  if (!isAllowedDate(date)) {
-    throw new Error("Invalid date. Please select today or tomorrow.");
+async function fetchJson<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: { Accept: "application/json" },
+    next: { revalidate: 0 },
+  });
+
+  if (!response.ok) {
+    let detail = `Request failed with status ${response.status}`;
+
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === "string") {
+        detail = body.detail;
+      }
+    } catch {
+      // no-op: keep generic detail
+    }
+
+    throw new Error(detail);
   }
 
-  return mockSlateByDate[date] ?? [];
+  return response.json() as Promise<T>;
 }
 
-export async function fetchTopPicksByDate(date: string): Promise<ValuePick[]> {
-  await sleep(SIMULATED_LATENCY_MS);
+export async function fetchGamesByDate(date: string): Promise<GamesResponse> {
+  return fetchJson<GamesResponse>(`/games?date=${encodeURIComponent(date)}`);
+}
 
-  if (!isAllowedDate(date)) {
-    throw new Error("Invalid date. Please select today or tomorrow.");
+export async function fetchDailyRecommendationsByDate(date: string): Promise<DailyRecommendationsResponse> {
+  return fetchJson<DailyRecommendationsResponse>(`/recommendations/daily?date=${encodeURIComponent(date)}`);
+}
+
+export async function fetchGameRecommendations(gameId: string, date: string): Promise<GameRecommendationsResponse | null> {
+  try {
+    return await fetchJson<GameRecommendationsResponse>(`/recommendations/game?game_id=${encodeURIComponent(gameId)}&date=${encodeURIComponent(date)}`);
+  } catch (error) {
+    if (error instanceof Error && error.message.toLowerCase().includes("not found")) {
+      return null;
+    }
+    throw error;
   }
-
-  return mockTopPicksByDate[date] ?? [];
 }
-
-export async function fetchGameDetail(gameId: string, date: string): Promise<GameDetail | null> {
-  await sleep(SIMULATED_LATENCY_MS);
-
-  if (!isAllowedDate(date)) {
-    throw new Error("Invalid date. Please select today or tomorrow.");
-  }
-
-  return mockDetailsByGameAndDate[date]?.[gameId] ?? null;
-}
-
-// NOTE: Keep this API surface stable so we can replace mock data with backend calls later.

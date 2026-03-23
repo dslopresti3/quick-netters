@@ -1,27 +1,20 @@
 from abc import ABC, abstractmethod
 from datetime import date
-from typing import Any
+
+from app.api.schemas import GameSummary, Recommendation
 
 
-class ScheduleProvider(ABC):
+class GamesProvider(ABC):
     @abstractmethod
-    def fetch(self, selected_date: date) -> list[dict[str, Any]]:
-        """Return schedule rows for a date."""
-
-
-class ProjectionsProvider(ABC):
-    @abstractmethod
-    def fetch(self, selected_date: date) -> list[dict[str, Any]]:
-        """Return player projection rows for a date."""
-
-
-class OddsProvider(ABC):
-    @abstractmethod
-    def fetch(self, selected_date: date) -> list[dict[str, Any]]:
-        """Return betting odds rows for a date."""
+    def fetch(self, selected_date: date) -> list[GameSummary]:
+        """Return all games for a date."""
 
 
 class RecommendationsProvider(ABC):
     @abstractmethod
-    def fetch(self, selected_date: date) -> list[dict[str, Any]]:
-        """Return recommendation rows for a date."""
+    def fetch_daily(self, selected_date: date) -> list[Recommendation]:
+        """Return all recommendations for a date."""
+
+    @abstractmethod
+    def fetch_for_game(self, selected_date: date, game_id: str) -> list[Recommendation]:
+        """Return recommendations for one game and date."""
