@@ -41,7 +41,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
     <main className="page stack-gap-lg">
       <header>
         <h1>Daily Slate</h1>
-        <p className="subtitle">{selectedDate} · API-backed mock data</p>
+        <p className="subtitle">{selectedDate} · Scheduled games, projections, and value picks</p>
       </header>
 
       <section className="card stack-gap">
@@ -49,10 +49,21 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
         <DatePickerForm defaultDate={selectedDate} minDate={min} maxDate={max} submitLabel="Update slate" actionPath="/slate" />
       </section>
 
+      {gamesResponse.notes.length > 0 && (
+        <section className="card stack-gap">
+          <h2>Data updates</h2>
+          <ul className="candidate-list">
+            {gamesResponse.notes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section className="card stack-gap">
-        <h2>Top daily recommendations</h2>
+        <h2>Top 3 overall value picks</h2>
         {dailyRecommendations.recommendations.length === 0 ? (
-          <p className="empty-state">No value picks available for {selectedDate}. Check back later.</p>
+          <p className="empty-state">No value picks available for {selectedDate}. Odds and projection inputs may still be loading.</p>
         ) : (
           <ol className="pick-list">
             {dailyRecommendations.recommendations.slice(0, 3).map((pick) => (
@@ -73,9 +84,16 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
         ) : (
           <div className="game-grid">
             {gamesResponse.games.map((game) => (
-              <Link href={`/games/${game.game_id}?date=${selectedDate}`} key={game.game_id} className="card game-card-link">
+              <Link href={`/games/${game.game_id}?date=${selectedDate}`} key={game.game_id} className="card game-card-link stack-gap-sm">
                 <p className="helper-text">{new Date(game.game_time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" })} UTC</p>
                 <h3>{game.away_team} @ {game.home_team}</h3>
+                {game.away_top_projected_scorer && game.home_top_projected_scorer ? (
+                  <p className="helper-text">
+                    Top projected scorers: {game.away_top_projected_scorer.player_name} ({(game.away_top_projected_scorer.model_probability * 100).toFixed(1)}%) · {game.home_top_projected_scorer.player_name} ({(game.home_top_projected_scorer.model_probability * 100).toFixed(1)}%)
+                  </p>
+                ) : (
+                  <p className="helper-text">Top projected scorer per team will appear once projections are available.</p>
+                )}
               </Link>
             ))}
           </div>
