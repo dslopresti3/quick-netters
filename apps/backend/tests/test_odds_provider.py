@@ -8,6 +8,9 @@ def test_the_odds_api_adapter_normalizes_rows_into_internal_schema() -> None:
     raw_events = [
         {
             "id": "evt-100",
+            "away_team": "NY Rangers",
+            "home_team": "Boston Bruins",
+            "commence_time": "2026-03-23T23:00:00Z",
             "bookmakers": [
                 {
                     "key": "draftkings",
@@ -29,8 +32,10 @@ def test_the_odds_api_adapter_normalizes_rows_into_internal_schema() -> None:
     rows = TheOddsApiAdapter(source_name="the-odds-api").normalize(raw_events, now=now)
 
     assert len(rows) == 2
-    assert rows[0].game_id == "evt-100"
-    assert rows[0].player_id == "player-artemi-panarin"
+    assert rows[0].nhl_game_id is None
+    assert rows[0].nhl_player_id is None
+    assert rows[0].provider_event_id == "evt-100"
+    assert rows[0].provider_player_name_raw == "Artemi Panarin"
     assert rows[0].market_odds_american == 425
     assert rows[0].source == "the-odds-api"
     assert rows[0].book == "draftkings"
@@ -43,6 +48,8 @@ def test_the_odds_api_adapter_skips_invalid_or_malformed_rows() -> None:
     raw_events = [
         {
             "id": "evt-100",
+            "away_team": "NY Rangers",
+            "home_team": "Boston Bruins",
             "bookmakers": [
                 {
                     "key": "fanduel",
@@ -67,7 +74,7 @@ def test_the_odds_api_adapter_skips_invalid_or_malformed_rows() -> None:
     rows = TheOddsApiAdapter(source_name="the-odds-api").normalize(raw_events, now=now)
 
     assert len(rows) == 1
-    assert rows[0].player_id == "player-valid-name"
+    assert rows[0].provider_player_name_raw == "Valid Name"
     assert rows[0].market_odds_american == -110
 
 

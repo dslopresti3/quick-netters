@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -66,9 +65,10 @@ class TheOddsApiAdapter:
         reference_now = now or datetime.now(timezone.utc)
 
         for event in raw_events:
-            game_id = self._extract_game_id(event)
-            if game_id is None:
-                continue
+            provider_event_id = self._extract_event_id(event)
+            away_team_raw = _extract_string(event.get("away_team"))
+            home_team_raw = _extract_string(event.get("home_team"))
+            provider_start_time = self._extract_provider_start_time(event)
 
             bookmakers = event.get("bookmakers")
             if not isinstance(bookmakers, list):
@@ -83,14 +83,13 @@ class TheOddsApiAdapter:
                     continue
 
                 for market in markets:
-                    if not isinstance(market, dict):
-                        continue
-                    if market.get("key") != self.market_key:
+                    if not isinstance(market, dict) or market.get("key") != self.market_key:
                         continue
 
                     snapshot_at = self._extract_snapshot_timestamp(market, bookmaker, reference_now)
                     freshness_seconds = max(int((reference_now - snapshot_at).total_seconds()), 0)
                     is_fresh = freshness_seconds <= int(self._stale_threshold.total_seconds())
+                    freshness_status = "fresh" if is_fresh else "stale"
                     if not is_fresh:
                         continue
 
@@ -99,7 +98,18 @@ class TheOddsApiAdapter:
                         continue
 
                     for outcome in outcomes:
-                        row = self._normalize_outcome(game_id, outcome, snapshot_at, book, freshness_seconds, is_fresh)
+                        row = self._normalize_outcome(
+                            outcome=outcome,
+                            provider_event_id=provider_event_id,
+                            away_team_raw=away_team_raw,
+                            home_team_raw=home_team_raw,
+                            provider_start_time=provider_start_time,
+                            snapshot_at=snapshot_at,
+                            book=book,
+                            freshness_seconds=freshness_seconds,
+                            is_fresh=is_fresh,
+                            freshness_status=freshness_status,
+                        )
                         if row is not None:
                             normalized_rows.append(row)
 
@@ -107,38 +117,50 @@ class TheOddsApiAdapter:
 
     def _normalize_outcome(
         self,
-        game_id: str,
         outcome: Any,
+        provider_event_id: str | None,
+        away_team_raw: str | None,
+        home_team_raw: str | None,
+        provider_start_time: datetime | None,
         snapshot_at: datetime,
         book: str | None,
         freshness_seconds: int,
         is_fresh: bool,
+        freshness_status: str,
     ) -> NormalizedPlayerOdds | None:
         if not isinstance(outcome, dict):
             return None
 
-        player_name = outcome.get("name")
-        if not isinstance(player_name, str) or not player_name.strip():
+        player_name = _extract_string(outcome.get("name"))
+        if player_name is None:
             return None
 
         odds_price = _parse_american_odds(outcome.get("price"))
         if odds_price is None:
             return None
 
-        player_id = _slug_player_id(player_name)
         return NormalizedPlayerOdds(
-            game_id=game_id,
-            player_id=player_id,
+            nhl_game_id=None,
+            nhl_player_id=None,
             market_odds_american=odds_price,
             snapshot_at=snapshot_at,
+            provider_name=self._source_name,
+            provider_event_id=provider_event_id,
+            provider_player_id=_extract_string(outcome.get("id")),
+            provider_player_name_raw=player_name,
+            provider_team_raw=_extract_string(outcome.get("description")),
+            away_team_raw=away_team_raw,
+            home_team_raw=home_team_raw,
+            provider_start_time=provider_start_time,
             source=self._source_name,
             book=book,
             freshness_seconds=freshness_seconds,
+            freshness_status=freshness_status,
             is_fresh=is_fresh,
         )
 
     @staticmethod
-    def _extract_game_id(event: dict[str, Any]) -> str | None:
+    def _extract_event_id(event: dict[str, Any]) -> str | None:
         game_id = event.get("id")
         if isinstance(game_id, str) and game_id.strip():
             return game_id
@@ -155,6 +177,16 @@ class TheOddsApiAdapter:
         if isinstance(book_title, str) and book_title.strip():
             return book_title
         return None
+
+    @staticmethod
+    def _extract_provider_start_time(event: dict[str, Any]) -> datetime | None:
+        commence_time = event.get("commence_time")
+        if not isinstance(commence_time, str):
+            return None
+        try:
+            return normalize_snapshot_timestamp(datetime.fromisoformat(commence_time.replace("Z", "+00:00")))
+        except ValueError:
+            return None
 
     @staticmethod
     def _extract_snapshot_timestamp(market: dict[str, Any], bookmaker: dict[str, Any], fallback: datetime) -> datetime:
@@ -184,6 +216,12 @@ class LiveOddsProvider(OddsProvider):
         return self._adapter.normalize(raw_events)
 
 
+def _extract_string(value: Any) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
 def _parse_american_odds(raw_price: Any) -> int | None:
     if isinstance(raw_price, bool):
         return None
@@ -210,8 +248,3 @@ def _parse_american_odds(raw_price: Any) -> int | None:
     if integer_price == 0:
         return None
     return integer_price
-
-
-def _slug_player_id(player_name: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", player_name.strip().lower()).strip("-")
-    return f"player-{slug}" if slug else "player-unknown"
