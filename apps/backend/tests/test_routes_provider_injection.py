@@ -5,6 +5,7 @@ from app.api.schemas import GameSummary
 from app.services.interfaces import OddsProvider, ProjectionProvider, ScheduleProvider
 from app.services.mock_services import ValueRecommendationService
 from app.services.odds import NormalizedPlayerOdds
+from app.services.odds_provider import LiveOddsProvider
 from app.services.provider_wiring import ProviderRegistry
 
 
@@ -82,3 +83,52 @@ def test_game_recommendations_route_uses_injected_registry() -> None:
 
     assert payload.game.game_id == "g-custom-vs-test"
     assert payload.recommendations[0].player_id == "p-custom"
+
+
+class _StubRawOddsClient:
+    provider_name = "the-odds-api"
+
+    def fetch_raw_events(self, selected_date: date) -> list[dict]:
+        return [
+            {
+                "id": "g-custom-vs-test",
+                "bookmakers": [
+                    {
+                        "key": "draftkings",
+                        "markets": [
+                            {
+                                "key": "player_first_goal_scorer",
+                                "last_update": datetime.combine(selected_date, time(18, 45), tzinfo=timezone.utc).isoformat(),
+                                "outcomes": [{"name": "Injected Player", "price": 250}],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+
+
+def test_daily_recommendations_route_integrates_with_live_odds_provider() -> None:
+    class _SlugProjectionProvider(ProjectionProvider):
+        def fetch_player_first_goal_projections(self, selected_date: date) -> list[tuple[str, str, str, str, float]]:
+            return [("g-custom-vs-test", "player-injected-player", "Injected Player", "Custom Home", 0.3)]
+
+    selected_date = date.today()
+    schedule_provider = StubScheduleProvider()
+    projection_provider = _SlugProjectionProvider()
+    odds_provider = LiveOddsProvider(client=_StubRawOddsClient())  # type: ignore[arg-type]
+    providers = ProviderRegistry(
+        schedule_provider=schedule_provider,
+        projection_provider=projection_provider,
+        odds_provider=odds_provider,
+        recommendation_service=ValueRecommendationService(
+            schedule_provider=schedule_provider,
+            projection_provider=projection_provider,
+            odds_provider=odds_provider,
+        ),
+    )
+
+    payload = get_daily_recommendations(date=selected_date, providers=providers)
+
+    assert payload.odds_available is True
+    assert payload.recommendations[0].market_odds == 250

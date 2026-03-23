@@ -15,6 +15,10 @@ class NormalizedPlayerOdds:
     player_id: str
     market_odds_american: int
     snapshot_at: datetime
+    source: str | None = None
+    book: str | None = None
+    freshness_seconds: int | None = None
+    is_fresh: bool | None = None
 
 
 def normalize_snapshot_timestamp(snapshot_at: datetime) -> datetime:

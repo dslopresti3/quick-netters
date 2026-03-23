@@ -12,6 +12,7 @@ from app.services.interfaces import (
     ProjectionProvider,
     RecommendationsProvider,
 )
+from app.services.odds_provider import LiveOddsProvider
 from app.services.odds import (
     NormalizedPlayerOdds,
     american_to_implied_probability,
@@ -46,15 +47,13 @@ class MockProjectionService(ProjectionProvider):
 
 
 class MockOddsService(OddsProvider):
-    """Mock provider that mimics an external odds source through a service layer."""
+    """Mock-mode wrapper around the live odds provider contract."""
 
     def __init__(self) -> None:
-        self._cache: dict[date, list[NormalizedPlayerOdds]] = {}
+        self._provider = LiveOddsProvider()
 
     def fetch_player_first_goal_odds(self, selected_date: date) -> list[NormalizedPlayerOdds]:
-        if selected_date not in self._cache:
-            self._cache[selected_date] = _build_odds(selected_date)
-        return list(self._cache[selected_date])
+        return self._provider.fetch_player_first_goal_odds(selected_date)
 
 
 class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
@@ -194,33 +193,6 @@ def _build_games(selected_date: date) -> list[GameSummary]:
             away_team="LA Kings",
             home_team="Vegas Golden Knights",
         ),
-    ]
-
-
-def _build_odds(selected_date: date) -> list[NormalizedPlayerOdds]:
-    snapshot_recent = datetime.combine(selected_date, time(22, 10), tzinfo=timezone.utc)
-    snapshot_stale = datetime.combine(selected_date, time(20, 0), tzinfo=timezone.utc)
-
-    base_rows = [
-        ("g-nyr-vs-bos", "p-david-pastrnak", 360, snapshot_recent),
-        ("g-col-vs-dal", "p-nathan-mackinnon", 350, snapshot_recent),
-        ("g-lak-vs-vgk", "p-jack-eichel", 410, snapshot_recent),
-        ("g-nyr-vs-bos", "p-artemi-panarin", 680, snapshot_recent),
-        ("g-col-vs-dal", "p-invalid-price", 0, snapshot_recent),
-        ("g-lak-vs-vgk", "p-stale-line", 300, snapshot_stale),
-    ]
-
-    if selected_date == date.today() + timedelta(days=1):
-        base_rows = []
-
-    return [
-        NormalizedPlayerOdds(
-            game_id=game_id,
-            player_id=player_id,
-            market_odds_american=market_odds_american,
-            snapshot_at=snapshot_at,
-        )
-        for game_id, player_id, market_odds_american, snapshot_at in base_rows
     ]
 
 
