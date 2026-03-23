@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
+import logging
 
 from app.services.projection_store import build_mock_projection_provider
 
@@ -20,6 +21,8 @@ from app.services.odds import (
     fair_american_odds,
     is_stale,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class MockGamesService(ScheduleProvider):
@@ -74,22 +77,15 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         return game_recommendations[:3]
 
     def projections_available(self, selected_date: date) -> bool:
-        return len(self._projection_provider.fetch_player_first_goal_projections(selected_date)) > 0
+        _, projections_available = self._build_top_projection_lookup(selected_date, games=None)
+        return projections_available
 
     def odds_available(self, selected_date: date) -> bool:
         snapshots = self._odds_provider.fetch_player_first_goal_odds(selected_date)
         return any(snapshot.market_odds_american != 0 for snapshot in snapshots)
 
     def attach_top_projected_scorers(self, selected_date: date, games: list[GameSummary]) -> list[GameSummary]:
-        projection_rows = self._projection_provider.fetch_player_first_goal_projections(selected_date)
-        top_by_game_team: dict[tuple[str, str], tuple[str, str, str, str, float]] = {}
-
-        for projection in projection_rows:
-            game_id, _, _, team_name, probability = projection
-            key = (game_id, team_name)
-            existing = top_by_game_team.get(key)
-            if existing is None or probability > existing[4]:
-                top_by_game_team[key] = projection
+        top_by_game_team, _ = self._build_top_projection_lookup(selected_date, games)
 
         enriched_games: list[GameSummary] = []
         for game in games:
@@ -118,6 +114,61 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
             enriched_games.append(enriched)
 
         return enriched_games
+
+    def _build_top_projection_lookup(
+        self,
+        selected_date: date,
+        games: list[GameSummary] | None,
+    ) -> tuple[dict[tuple[str, str], tuple[str, str, str, str, float]], bool]:
+        projection_rows = self._projection_provider.fetch_player_first_goal_projections(selected_date)
+        valid_game_teams: set[tuple[str, str]] | None = None
+        if games is not None:
+            valid_game_teams = {
+                (game.game_id, game.away_team)
+                for game in games
+            } | {
+                (game.game_id, game.home_team)
+                for game in games
+            }
+
+        top_by_game_team: dict[tuple[str, str], tuple[str, str, str, str, float]] = {}
+        attached_projection_count = 0
+
+        for idx, projection in enumerate(projection_rows):
+            game_id, player_id, player_name, team_name, probability = projection
+
+            if not isinstance(player_id, str) or not player_id.strip():
+                logger.warning("Skipping projection row with missing player_id", extra={"selected_date": selected_date.isoformat(), "row_index": idx})
+                continue
+            if not isinstance(player_name, str) or not player_name.strip():
+                logger.warning("Skipping projection row with missing player_name", extra={"selected_date": selected_date.isoformat(), "row_index": idx})
+                continue
+            if not isinstance(probability, (int, float)):
+                logger.warning(
+                    "Skipping projection row with non-numeric probability",
+                    extra={"selected_date": selected_date.isoformat(), "row_index": idx, "value": probability},
+                )
+                continue
+
+            probability_value = float(probability)
+            if probability_value <= 0 or probability_value >= 1:
+                logger.warning(
+                    "Skipping projection row with invalid probability",
+                    extra={"selected_date": selected_date.isoformat(), "row_index": idx, "value": probability_value},
+                )
+                continue
+
+            projection_key = (game_id, team_name)
+            if valid_game_teams is not None and projection_key not in valid_game_teams:
+                continue
+
+            attached_projection_count += 1
+            normalized_projection = (game_id, player_id.strip(), player_name.strip(), team_name, probability_value)
+            existing = top_by_game_team.get(projection_key)
+            if existing is None or probability_value > existing[4]:
+                top_by_game_team[projection_key] = normalized_projection
+
+        return top_by_game_team, attached_projection_count > 0
 
     def _build_ranked_recommendations(self, selected_date: date) -> list[Recommendation]:
         games_by_id = {game.game_id: game for game in self._schedule_provider.fetch(selected_date)}
