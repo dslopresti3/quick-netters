@@ -1,6 +1,6 @@
 # Quick Netters Monorepo
 
-Initial scaffold for a mock-first tennis decision support platform.
+Initial scaffold for a mock-hockey first goal scorer support platform.
 
 ## Monorepo structure
 
