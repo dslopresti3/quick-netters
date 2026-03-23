@@ -8,7 +8,12 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from app.services.interfaces import ProjectionProvider
+from app.services.interfaces import (
+    PlayerHistoricalProduction,
+    PlayerProjectionCandidate,
+    PlayerRosterEligibility,
+    ProjectionProvider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +22,12 @@ logger = logging.getLogger(__name__)
 class PlayerFirstGoalProjectionRow:
     projection_date: date
     game_id: str
-    player_id: str
+    nhl_player_id: str
     player_name: str
-    team_name: str
+    projected_team_name: str
+    active_team_name: str
+    is_active_roster: bool
+    historical_production: PlayerHistoricalProduction
     model_probability: float
 
 
@@ -56,7 +64,7 @@ class StoreBackedProjectionProvider(ProjectionProvider):
     def __init__(self, store: PlayerFirstGoalProjectionStore) -> None:
         self._store = store
 
-    def fetch_player_first_goal_projections(self, selected_date: date) -> list[tuple[str, str, str, str, float]]:
+    def fetch_player_first_goal_projections(self, selected_date: date) -> list[PlayerProjectionCandidate]:
         try:
             rows = self._store.load_for_date(selected_date)
         except ProjectionStoreValidationError as exc:
@@ -66,7 +74,18 @@ class StoreBackedProjectionProvider(ProjectionProvider):
             )
             return []
         return [
-            (row.game_id, row.player_id, row.player_name, row.team_name, row.model_probability)
+            PlayerProjectionCandidate(
+                game_id=row.game_id,
+                nhl_player_id=row.nhl_player_id,
+                player_name=row.player_name,
+                projected_team_name=row.projected_team_name,
+                model_probability=row.model_probability,
+                historical_production=row.historical_production,
+                roster_eligibility=PlayerRosterEligibility(
+                    active_team_name=row.active_team_name,
+                    is_active_roster=row.is_active_roster,
+                ),
+            )
             for row in rows
         ]
 
@@ -115,11 +134,11 @@ def _parse_projection_payload(payload: dict[str, Any], selected_date: date) -> l
             raise ProjectionStoreValidationError(f"Projection row at index {idx} must be an object.")
 
         row = _parse_projection_row(raw_row=raw_row, idx=idx)
-        dedupe_key = (row.projection_date, row.game_id, row.player_id)
+        dedupe_key = (row.projection_date, row.game_id, row.nhl_player_id)
         if dedupe_key in seen_keys:
             raise ProjectionStoreValidationError(
                 "Duplicate projection row for key "
-                f"(date={row.projection_date.isoformat()}, game_id={row.game_id}, player_id={row.player_id})."
+                f"(date={row.projection_date.isoformat()}, game_id={row.game_id}, player_id={row.nhl_player_id})."
             )
         seen_keys.add(dedupe_key)
 
@@ -132,9 +151,14 @@ def _parse_projection_payload(payload: dict[str, Any], selected_date: date) -> l
 def _parse_projection_row(raw_row: dict[str, Any], idx: int) -> PlayerFirstGoalProjectionRow:
     projection_date_raw = raw_row.get("date")
     game_id_raw = raw_row.get("game_id")
+    nhl_player_id_raw = raw_row.get("nhl_player_id")
     player_id_raw = raw_row.get("player_id")
     player_name_raw = raw_row.get("player_name")
     team_name_raw = raw_row.get("team_name")
+    active_team_name_raw = raw_row.get("active_team_name")
+    is_active_roster_raw = raw_row.get("is_active_roster", True)
+    season_first_goals_raw = raw_row.get("historical_season_first_goals")
+    season_games_played_raw = raw_row.get("historical_season_games_played")
     probability_raw = raw_row.get("model_probability")
 
     if not isinstance(projection_date_raw, str):
@@ -150,7 +174,8 @@ def _parse_projection_row(raw_row: dict[str, Any], idx: int) -> PlayerFirstGoalP
     if not isinstance(game_id_raw, str) or not game_id_raw.strip():
         raise ProjectionStoreValidationError(f"Projection row at index {idx} has a missing or empty 'game_id'.")
 
-    if not isinstance(player_id_raw, str) or not player_id_raw.strip():
+    canonical_player_id = nhl_player_id_raw if isinstance(nhl_player_id_raw, str) and nhl_player_id_raw.strip() else player_id_raw
+    if not isinstance(canonical_player_id, str) or not canonical_player_id.strip():
         raise ProjectionStoreValidationError(f"Projection row at index {idx} has a missing or empty 'player_id'.")
 
     if not isinstance(player_name_raw, str) or not player_name_raw.strip():
@@ -158,6 +183,12 @@ def _parse_projection_row(raw_row: dict[str, Any], idx: int) -> PlayerFirstGoalP
 
     if not isinstance(team_name_raw, str) or not team_name_raw.strip():
         raise ProjectionStoreValidationError(f"Projection row at index {idx} has a missing or empty 'team_name'.")
+    if active_team_name_raw is None:
+        active_team_name_raw = team_name_raw
+    if not isinstance(active_team_name_raw, str) or not active_team_name_raw.strip():
+        raise ProjectionStoreValidationError(f"Projection row at index {idx} has a missing or empty 'active_team_name'.")
+    if not isinstance(is_active_roster_raw, bool):
+        raise ProjectionStoreValidationError(f"Projection row at index {idx} has a non-boolean 'is_active_roster'.")
 
     if not isinstance(probability_raw, (int, float)):
         raise ProjectionStoreValidationError(f"Projection row at index {idx} has a non-numeric 'model_probability'.")
@@ -168,11 +199,33 @@ def _parse_projection_row(raw_row: dict[str, Any], idx: int) -> PlayerFirstGoalP
             f"Projection row at index {idx} has an invalid 'model_probability' ({probability}); expected 0 < p < 1."
         )
 
+    season_first_goals: float | None = None
+    if season_first_goals_raw is not None:
+        if not isinstance(season_first_goals_raw, (int, float)):
+            raise ProjectionStoreValidationError(
+                f"Projection row at index {idx} has a non-numeric 'historical_season_first_goals'."
+            )
+        season_first_goals = float(season_first_goals_raw)
+
+    season_games_played: float | None = None
+    if season_games_played_raw is not None:
+        if not isinstance(season_games_played_raw, (int, float)):
+            raise ProjectionStoreValidationError(
+                f"Projection row at index {idx} has a non-numeric 'historical_season_games_played'."
+            )
+        season_games_played = float(season_games_played_raw)
+
     return PlayerFirstGoalProjectionRow(
         projection_date=projection_date,
         game_id=game_id_raw.strip(),
-        player_id=player_id_raw.strip(),
+        nhl_player_id=canonical_player_id.strip(),
         player_name=player_name_raw.strip(),
-        team_name=team_name_raw.strip(),
+        projected_team_name=team_name_raw.strip(),
+        active_team_name=active_team_name_raw.strip(),
+        is_active_roster=is_active_roster_raw,
+        historical_production=PlayerHistoricalProduction(
+            season_first_goals=season_first_goals,
+            season_games_played=season_games_played,
+        ),
         model_probability=probability,
     )

@@ -8,7 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from app.api.schemas import GameSummary
-from app.services.interfaces import OddsProvider, ProjectionProvider, ScheduleProvider
+from app.services.interfaces import OddsProvider, PlayerProjectionCandidate, ProjectionProvider, ScheduleProvider
 from app.services.odds import NormalizedPlayerOdds
 
 logger = logging.getLogger(__name__)
@@ -217,7 +217,7 @@ class EmptyScheduleProvider(ScheduleProvider):
 class EmptyProjectionProvider(ProjectionProvider):
     """Production wiring placeholder until model projection integration is added."""
 
-    def fetch_player_first_goal_projections(self, selected_date: date) -> list[tuple[str, str, str, str, float]]:
+    def fetch_player_first_goal_projections(self, selected_date: date) -> list[PlayerProjectionCandidate]:
         return []
 
 

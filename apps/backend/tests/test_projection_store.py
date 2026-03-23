@@ -7,6 +7,7 @@ import pytest
 
 from app.api.routes import get_games
 from app.api.schemas import GameSummary
+from app.services.interfaces import PlayerHistoricalProduction, PlayerProjectionCandidate, PlayerRosterEligibility
 from app.services.projection_store import (
     JsonArtifactProjectionStore,
     ProjectionStoreValidationError,
@@ -50,7 +51,11 @@ def test_store_loads_rows_for_selected_date(tmp_path) -> None:
 
     rows = provider.fetch_player_first_goal_projections(date(2026, 3, 23))
 
-    assert rows == [("g-1", "p-1", "Player One", "Team One", 0.22)]
+    assert len(rows) == 1
+    assert rows[0].game_id == "g-1"
+    assert rows[0].nhl_player_id == "p-1"
+    assert rows[0].roster_eligibility.active_team_name == "Team One"
+    assert rows[0].roster_eligibility.is_active_roster is True
 
 
 @pytest.mark.parametrize(
@@ -386,9 +391,33 @@ def test_projection_availability_false_when_rows_are_invalid_or_unmatched() -> N
     class _InvalidProjectionProvider:
         def fetch_player_first_goal_projections(self, selected_date: date):
             return [
-                ("g-nyr-vs-bos", "", "No Player", "NY Rangers", 0.22),
-                ("g-nyr-vs-bos", "p-1", "Bad Probability", "NY Rangers", 1.2),
-                ("g-col-vs-dal", "p-2", "", "Colorado Avalanche", 0.23),
+                PlayerProjectionCandidate(
+                    game_id="g-nyr-vs-bos",
+                    nhl_player_id="p-0",
+                    player_name="No Player",
+                    projected_team_name="NY Rangers",
+                    model_probability=0.22,
+                    historical_production=PlayerHistoricalProduction(),
+                    roster_eligibility=PlayerRosterEligibility(active_team_name="No Team"),
+                ),
+                PlayerProjectionCandidate(
+                    game_id="g-nyr-vs-bos",
+                    nhl_player_id="p-1",
+                    player_name="Bad Probability",
+                    projected_team_name="NY Rangers",
+                    model_probability=1.2,
+                    historical_production=PlayerHistoricalProduction(),
+                    roster_eligibility=PlayerRosterEligibility(active_team_name="NY Rangers"),
+                ),
+                PlayerProjectionCandidate(
+                    game_id="g-col-vs-dal",
+                    nhl_player_id="p-2",
+                    player_name="Blank Team",
+                    projected_team_name="Colorado Avalanche",
+                    model_probability=0.23,
+                    historical_production=PlayerHistoricalProduction(),
+                    roster_eligibility=PlayerRosterEligibility(active_team_name=""),
+                ),
             ]
 
     schedule_provider = MockGamesService()
@@ -407,3 +436,91 @@ def test_projection_availability_false_when_rows_are_invalid_or_unmatched() -> N
     assert service.projections_available(date(2026, 3, 23)) is False
     assert all(game.away_top_projected_scorer is None for game in enriched_games)
     assert all(game.home_top_projected_scorer is None for game in enriched_games)
+
+
+def test_traded_player_keeps_historical_totals_but_only_new_team_is_eligible(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {
+                "date": "2026-03-23",
+                "game_id": "g-col-vs-dal",
+                "nhl_player_id": "nhl-1001",
+                "player_name": "Trade Player",
+                "team_name": "NY Rangers",
+                "active_team_name": "Boston Bruins",
+                "is_active_roster": True,
+                "historical_season_first_goals": 7,
+                "historical_season_games_played": 59,
+                "model_probability": 0.35,
+            },
+            {
+                "date": "2026-03-23",
+                "game_id": "g-nyr-vs-bos",
+                "nhl_player_id": "nhl-1001",
+                "player_name": "Trade Player",
+                "team_name": "Boston Bruins",
+                "active_team_name": "Boston Bruins",
+                "is_active_roster": True,
+                "historical_season_first_goals": 7,
+                "historical_season_games_played": 59,
+                "model_probability": 0.35,
+            },
+        ],
+    )
+
+    provider = StoreBackedProjectionProvider(store=JsonArtifactProjectionStore(artifact))
+    rows = provider.fetch_player_first_goal_projections(date(2026, 3, 23))
+    traded_player_rows = [row for row in rows if row.nhl_player_id == "nhl-1001"]
+    assert len(traded_player_rows) == 2
+    assert all(row.historical_production.season_first_goals == 7 for row in traded_player_rows)
+    assert all(row.historical_production.season_games_played == 59 for row in traded_player_rows)
+
+    schedule_provider = MockGamesService()
+    odds_provider = EmptyOddsProvider()
+    service = ValueRecommendationService(
+        schedule_provider=schedule_provider,
+        projection_provider=provider,
+        odds_provider=odds_provider,
+    )
+
+    games = schedule_provider.fetch(date(2026, 3, 23))
+    game = next(item for item in service.attach_top_projected_scorers(date(2026, 3, 23), games) if item.game_id == "g-nyr-vs-bos")
+    assert game.away_top_projected_scorer is None
+    assert game.home_top_projected_scorer is not None
+    assert game.home_top_projected_scorer.player_id == "nhl-1001"
+
+
+def test_inactive_non_roster_player_is_excluded_from_top_scorer_and_recommendations(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {
+                "date": "2026-03-23",
+                "game_id": "g-nyr-vs-bos",
+                "nhl_player_id": "nhl-inactive",
+                "player_name": "Inactive Player",
+                "team_name": "Boston Bruins",
+                "active_team_name": "Boston Bruins",
+                "is_active_roster": False,
+                "model_probability": 0.9,
+            }
+        ],
+    )
+
+    schedule_provider = MockGamesService()
+    projection_provider = StoreBackedProjectionProvider(store=JsonArtifactProjectionStore(artifact))
+    odds_provider = EmptyOddsProvider()
+    service = ValueRecommendationService(
+        schedule_provider=schedule_provider,
+        projection_provider=projection_provider,
+        odds_provider=odds_provider,
+    )
+
+    games = schedule_provider.fetch(date(2026, 3, 23))
+    game = next(item for item in service.attach_top_projected_scorers(date(2026, 3, 23), games) if item.game_id == "g-nyr-vs-bos")
+    assert game.away_top_projected_scorer is None
+    assert game.home_top_projected_scorer is None
+    assert service.fetch_daily(date(2026, 3, 23)) == []

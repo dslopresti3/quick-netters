@@ -6,7 +6,14 @@ from unittest.mock import patch
 
 from app.api.routes import get_daily_recommendations, get_date_availability, get_game_recommendations, get_games
 from app.api.schemas import GameSummary
-from app.services.interfaces import OddsProvider, ProjectionProvider, ScheduleProvider
+from app.services.interfaces import (
+    OddsProvider,
+    PlayerHistoricalProduction,
+    PlayerProjectionCandidate,
+    PlayerRosterEligibility,
+    ProjectionProvider,
+    ScheduleProvider,
+)
 from app.services.mock_services import ValueRecommendationService
 from app.services.odds import NormalizedPlayerOdds
 from app.services.odds_provider import LiveOddsProvider
@@ -27,9 +34,17 @@ class StubScheduleProvider(ScheduleProvider):
 
 
 class StubProjectionProvider(ProjectionProvider):
-    def fetch_player_first_goal_projections(self, selected_date: date) -> list[tuple[str, str, str, str, float]]:
+    def fetch_player_first_goal_projections(self, selected_date: date) -> list[PlayerProjectionCandidate]:
         return [
-            ("g-custom-vs-test", "p-custom", "Injected Player", "Custom Home", 0.3),
+            PlayerProjectionCandidate(
+                game_id="g-custom-vs-test",
+                nhl_player_id="p-custom",
+                player_name="Injected Player",
+                projected_team_name="Custom Home",
+                model_probability=0.3,
+                historical_production=PlayerHistoricalProduction(),
+                roster_eligibility=PlayerRosterEligibility(active_team_name="Custom Home", is_active_roster=True),
+            ),
         ]
 
 
@@ -40,7 +55,7 @@ class StubOddsProvider(OddsProvider):
                 game_id="g-custom-vs-test",
                 player_id="p-custom",
                 market_odds_american=250,
-                snapshot_at=datetime.combine(selected_date, time(18, 30), tzinfo=timezone.utc),
+                snapshot_at=datetime.now(timezone.utc),
             )
         ]
 
@@ -103,7 +118,7 @@ class _StubRawOddsClient:
                         "markets": [
                             {
                                 "key": "player_first_goal_scorer",
-                                "last_update": datetime.combine(selected_date, time(18, 45), tzinfo=timezone.utc).isoformat(),
+                                "last_update": datetime.now(timezone.utc).isoformat(),
                                 "outcomes": [{"name": "Injected Player", "price": 250}],
                             }
                         ],
@@ -115,8 +130,18 @@ class _StubRawOddsClient:
 
 def test_daily_recommendations_route_integrates_with_live_odds_provider() -> None:
     class _SlugProjectionProvider(ProjectionProvider):
-        def fetch_player_first_goal_projections(self, selected_date: date) -> list[tuple[str, str, str, str, float]]:
-            return [("g-custom-vs-test", "player-injected-player", "Injected Player", "Custom Home", 0.3)]
+        def fetch_player_first_goal_projections(self, selected_date: date) -> list[PlayerProjectionCandidate]:
+            return [
+                PlayerProjectionCandidate(
+                    game_id="g-custom-vs-test",
+                    nhl_player_id="player-injected-player",
+                    player_name="Injected Player",
+                    projected_team_name="Custom Home",
+                    model_probability=0.3,
+                    historical_production=PlayerHistoricalProduction(),
+                    roster_eligibility=PlayerRosterEligibility(active_team_name="Custom Home", is_active_roster=True),
+                )
+            ]
 
     selected_date = date.today()
     schedule_provider = StubScheduleProvider()
@@ -145,7 +170,7 @@ class EmptyScheduleProvider(ScheduleProvider):
 
 
 class EmptyProjectionProvider(ProjectionProvider):
-    def fetch_player_first_goal_projections(self, selected_date: date) -> list[tuple[str, str, str, str, float]]:
+    def fetch_player_first_goal_projections(self, selected_date: date) -> list[PlayerProjectionCandidate]:
         return []
 
 
@@ -278,7 +303,7 @@ def test_games_route_real_schedule_provider_non_empty_with_upstream_payload() ->
         def __exit__(self, exc_type, exc, tb) -> None:
             self.close()
 
-    with patch("app.services.real_services.urlopen", return_value=_FakeResponse(payload)):
+    with patch("app.services.real_services.urlopen", side_effect=lambda *args, **kwargs: _FakeResponse(payload)):
         response = get_games(date=selected_date, providers=providers)
 
     assert len(response.games) == 1

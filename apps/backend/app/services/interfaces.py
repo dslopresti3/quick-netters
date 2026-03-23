@@ -1,8 +1,32 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import date
 
 from app.api.schemas import GameSummary, Recommendation
 from app.services.odds import NormalizedPlayerOdds
+
+
+@dataclass(frozen=True)
+class PlayerHistoricalProduction:
+    season_first_goals: float | None = None
+    season_games_played: float | None = None
+
+
+@dataclass(frozen=True)
+class PlayerRosterEligibility:
+    active_team_name: str
+    is_active_roster: bool = True
+
+
+@dataclass(frozen=True)
+class PlayerProjectionCandidate:
+    game_id: str
+    nhl_player_id: str
+    player_name: str
+    projected_team_name: str
+    model_probability: float
+    historical_production: PlayerHistoricalProduction
+    roster_eligibility: PlayerRosterEligibility
 
 
 class ScheduleProvider(ABC):
@@ -13,8 +37,8 @@ class ScheduleProvider(ABC):
 
 class ProjectionProvider(ABC):
     @abstractmethod
-    def fetch_player_first_goal_projections(self, selected_date: date) -> list[tuple[str, str, str, str, float]]:
-        """Return (game_id, player_id, player_name, team_name, model_probability) rows for a date."""
+    def fetch_player_first_goal_projections(self, selected_date: date) -> list[PlayerProjectionCandidate]:
+        """Return per-game projection candidates keyed by canonical NHL player identity."""
 
 
 class OddsProvider(ABC):
