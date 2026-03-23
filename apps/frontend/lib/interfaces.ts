@@ -1,5 +1,19 @@
 export type ConfidenceTag = "high" | "medium" | "watch";
 
+export type DateAvailabilityStatus = "invalid_date" | "no_schedule" | "missing_projections" | "missing_odds" | "ready";
+
+export interface DateAvailabilityResponse {
+  selected_date: string;
+  min_allowed_date: string;
+  max_allowed_date: string;
+  valid_by_product_rule: boolean;
+  schedule_available: boolean;
+  projections_available: boolean;
+  odds_available: boolean;
+  status: DateAvailabilityStatus;
+  messages: string[];
+}
+
 export interface TeamProjectionLeader {
   team: string;
   player_id: string;

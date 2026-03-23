@@ -1,24 +1,16 @@
-import type { DailyRecommendationsResponse, GameRecommendationsResponse, GamesResponse } from "./interfaces";
+import type {
+  DailyRecommendationsResponse,
+  DateAvailabilityResponse,
+  GameRecommendationsResponse,
+  GamesResponse,
+} from "./interfaces";
 
 const API_BASE_URL = process.env.API_BASE_URL ?? "http://127.0.0.1:8000";
 
-const formatDate = (date: Date): string => date.toISOString().slice(0, 10);
+export const formatDate = (date: Date): string => date.toISOString().slice(0, 10);
 
-const today = new Date();
-const tomorrow = new Date(today);
-tomorrow.setDate(today.getDate() + 1);
-
-export function getDefaultDate(): string {
-  return formatDate(today);
-}
-
-export function getAllowedDateBounds() {
-  return { min: formatDate(today), max: formatDate(tomorrow) };
-}
-
-export function isAllowedDate(date: string): boolean {
-  const { min, max } = getAllowedDateBounds();
-  return date === min || date === max;
+export function getCurrentUtcDate(): string {
+  return formatDate(new Date());
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -43,6 +35,10 @@ async function fetchJson<T>(path: string): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+export async function fetchDateAvailability(date: string): Promise<DateAvailabilityResponse> {
+  return fetchJson<DateAvailabilityResponse>(`/availability/date?date=${encodeURIComponent(date)}`);
 }
 
 export async function fetchGamesByDate(date: string): Promise<GamesResponse> {

@@ -1,12 +1,6 @@
 import Link from "next/link";
 import { DatePickerForm } from "../../components/date-picker-form";
-import {
-  fetchDailyRecommendationsByDate,
-  fetchGamesByDate,
-  getAllowedDateBounds,
-  getDefaultDate,
-  isAllowedDate,
-} from "../../lib/mock-api";
+import { fetchDailyRecommendationsByDate, fetchDateAvailability, fetchGamesByDate, getCurrentUtcDate } from "../../lib/api";
 
 type SlatePageProps = {
   searchParams?: {
@@ -15,27 +9,67 @@ type SlatePageProps = {
 };
 
 export default async function SlatePage({ searchParams }: SlatePageProps) {
-  const selectedDate = searchParams?.date ?? getDefaultDate();
-  const { min, max } = getAllowedDateBounds();
+  const selectedDate = searchParams?.date ?? getCurrentUtcDate();
+  const availability = await fetchDateAvailability(selectedDate);
 
-  if (!isAllowedDate(selectedDate)) {
+  if (!availability.valid_by_product_rule) {
     return (
       <main className="page">
         <h1>Daily Slate</h1>
         <section className="card stack-gap">
           <h2>Invalid date</h2>
-          <p className="helper-text">Please choose either {min} (today) or {max} (tomorrow).</p>
-          <DatePickerForm defaultDate={getDefaultDate()} minDate={min} maxDate={max} submitLabel="Reload slate" actionPath="/slate" />
+          <ul className="candidate-list">
+            {availability.messages.map((message) => (
+              <li key={message}>{message}</li>
+            ))}
+          </ul>
+          <DatePickerForm
+            defaultDate={availability.min_allowed_date}
+            minDate={availability.min_allowed_date}
+            maxDate={availability.max_allowed_date}
+            submitLabel="Reload slate"
+            actionPath="/slate"
+          />
           <Link href="/" className="secondary-link">Back home</Link>
         </section>
       </main>
     );
   }
 
-  const [gamesResponse, dailyRecommendations] = await Promise.all([
-    fetchGamesByDate(selectedDate),
-    fetchDailyRecommendationsByDate(selectedDate),
-  ]);
+  if (!availability.schedule_available) {
+    return (
+      <main className="page stack-gap-lg">
+        <header>
+          <h1>Daily Slate</h1>
+          <p className="subtitle">{selectedDate} · Scheduled games and value picks</p>
+        </header>
+
+        <section className="card stack-gap">
+          <h2>Change date</h2>
+          <DatePickerForm
+            defaultDate={selectedDate}
+            minDate={availability.min_allowed_date}
+            maxDate={availability.max_allowed_date}
+            submitLabel="Update slate"
+            actionPath="/slate"
+          />
+        </section>
+
+        <section className="card stack-gap">
+          <h2>No scheduled games</h2>
+          <ul className="candidate-list">
+            {availability.messages.map((message) => (
+              <li key={message}>{message}</li>
+            ))}
+          </ul>
+        </section>
+      </main>
+    );
+  }
+
+  const gamesResponse = await fetchGamesByDate(selectedDate);
+  const shouldLoadRecommendations = availability.projections_available && availability.odds_available;
+  const dailyRecommendations = shouldLoadRecommendations ? await fetchDailyRecommendationsByDate(selectedDate) : null;
 
   return (
     <main className="page stack-gap-lg">
@@ -46,8 +80,25 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
 
       <section className="card stack-gap">
         <h2>Change date</h2>
-        <DatePickerForm defaultDate={selectedDate} minDate={min} maxDate={max} submitLabel="Update slate" actionPath="/slate" />
+        <DatePickerForm
+          defaultDate={selectedDate}
+          minDate={availability.min_allowed_date}
+          maxDate={availability.max_allowed_date}
+          submitLabel="Update slate"
+          actionPath="/slate"
+        />
       </section>
+
+      {availability.messages.length > 0 && availability.status !== "ready" && (
+        <section className="card stack-gap">
+          <h2>Data updates</h2>
+          <ul className="candidate-list">
+            {availability.messages.map((message) => (
+              <li key={message}>{message}</li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {gamesResponse.notes.length > 0 && (
         <section className="card stack-gap">
@@ -62,8 +113,12 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
 
       <section className="card stack-gap">
         <h2>Top 3 overall value picks</h2>
-        {dailyRecommendations.recommendations.length === 0 ? (
-          <p className="empty-state">No value picks available for {selectedDate}. Odds and projection inputs may still be loading.</p>
+        {!availability.projections_available ? (
+          <p className="empty-state">Schedule is posted, but projections are still pending for this date.</p>
+        ) : !availability.odds_available ? (
+          <p className="empty-state">Projections are ready, but market odds are not posted yet.</p>
+        ) : !dailyRecommendations || dailyRecommendations.recommendations.length === 0 ? (
+          <p className="empty-state">No value picks available for {selectedDate}.</p>
         ) : (
           <ol className="pick-list">
             {dailyRecommendations.recommendations.slice(0, 3).map((pick) => (
