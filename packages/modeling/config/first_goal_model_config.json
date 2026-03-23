@@ -1,0 +1,29 @@
+{
+  "season_weights": {
+    "last_season": 0.75,
+    "current_season": 1.0
+  },
+  "rolling_windows": {
+    "team_games": 15,
+    "player_games": 20,
+    "team_recent_weight": 0.35,
+    "player_recent_weight": 0.4
+  },
+  "minimum_samples": {
+    "team_games": 12,
+    "player_games": 8,
+    "team_first_goals": 4
+  },
+  "shrinkage": {
+    "team_prior_strength": 20.0,
+    "player_prior_strength": 12.0
+  },
+  "home_away": {
+    "enabled": true,
+    "home_ice_advantage": 0.12
+  },
+  "feature_toggles": {
+    "use_projected_lineup": true,
+    "use_toi_projection": true
+  }
+}
