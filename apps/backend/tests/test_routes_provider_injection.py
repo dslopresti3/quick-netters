@@ -1,4 +1,3 @@
-import contextlib
 import io
 import json
 from datetime import date, datetime, time, timedelta, timezone
@@ -266,10 +265,20 @@ def test_games_route_real_schedule_provider_non_empty_with_upstream_payload() ->
         ]
     }
 
-    with patch(
-        "app.services.real_services.urlopen",
-        return_value=contextlib.nullcontext(io.StringIO(json.dumps(payload))),
-    ):
+    class _FakeResponse(io.StringIO):
+        def __init__(self, raw_payload: dict) -> None:
+            super().__init__(json.dumps(raw_payload))
+
+        def getcode(self) -> int:
+            return 200
+
+        def __enter__(self) -> "_FakeResponse":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            self.close()
+
+    with patch("app.services.real_services.urlopen", return_value=_FakeResponse(payload)):
         response = get_games(date=selected_date, providers=providers)
 
     assert len(response.games) == 1

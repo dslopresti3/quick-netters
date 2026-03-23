@@ -5,13 +5,22 @@ import logging
 from datetime import date, datetime, timezone
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from app.api.schemas import GameSummary
 from app.services.interfaces import OddsProvider, ProjectionProvider, ScheduleProvider
 from app.services.odds import NormalizedPlayerOdds
 
 logger = logging.getLogger(__name__)
+
+NHL_API_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/123.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json",
+}
 
 
 class NhlScheduleProvider(ScheduleProvider):
@@ -25,13 +34,35 @@ class NhlScheduleProvider(ScheduleProvider):
     def fetch(self, selected_date: date) -> list[GameSummary]:
         self.last_fetch_error = None
         url = f"{self.base_url}/{selected_date.isoformat()}"
-        logger.info("Fetching NHL schedule", extra={"selected_date": selected_date.isoformat(), "url": url})
+        request = _build_nhl_request(url)
+        logger.info(
+            "Fetching NHL schedule",
+            extra={"selected_date": selected_date.isoformat(), "url": url, "headers": dict(request.header_items())},
+        )
         try:
-            with urlopen(url, timeout=10) as response:
+            with urlopen(request, timeout=10) as response:
+                status_code = response.getcode()
+                logger.info(
+                    "NHL schedule response status",
+                    extra={"selected_date": selected_date.isoformat(), "url": url, "status_code": status_code},
+                )
                 payload = json.load(response)
+                logger.info(
+                    "NHL schedule JSON parse status",
+                    extra={"selected_date": selected_date.isoformat(), "url": url, "json_parse_succeeded": True},
+                )
                 logger.info(
                     "NHL upstream raw schedule response",
                     extra={"selected_date": selected_date.isoformat(), "raw_payload": payload},
+                )
+                extracted_games = _extract_games(payload)
+                logger.info(
+                    "NHL extracted games count",
+                    extra={
+                        "selected_date": selected_date.isoformat(),
+                        "url": url,
+                        "extracted_games_count": len(extracted_games),
+                    },
                 )
         except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
             self.last_fetch_error = f"NHL schedule fetch failed for {selected_date.isoformat()} from {url}: {exc}"
@@ -41,12 +72,17 @@ class NhlScheduleProvider(ScheduleProvider):
                     "selected_date": selected_date.isoformat(),
                     "url": url,
                     "error": str(exc),
+                    "json_parse_succeeded": False,
                     "schedule_fetch_error_note": self.last_fetch_error,
                 },
             )
             return []
 
         return _map_schedule_payload(payload, selected_date=selected_date)
+
+
+def _build_nhl_request(url: str) -> Request:
+    return Request(url=url, headers=NHL_API_HEADERS)
 
 
 def _map_schedule_payload(payload: dict[str, Any], selected_date: date | None = None) -> list[GameSummary]:
