@@ -5,7 +5,7 @@ from app.api.routes import get_games
 from app.api.schemas import GameSummary
 from app.services.dev_projection_provider import ActiveRosterRepository, AutoGeneratingProjectionProvider
 from app.services.interfaces import ScheduleProvider
-from app.services.mock_services import ValueRecommendationService
+from app.services.recommendation_service import ValueRecommendationService
 from app.services.provider_wiring import ProviderRegistry
 from app.services.real_services import EmptyOddsProvider
 

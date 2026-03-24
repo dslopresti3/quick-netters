@@ -1,9 +1,8 @@
-import io
-import json
 from datetime import date
 from urllib.error import HTTPError, URLError
 from unittest.mock import patch
 
+from app.api.routes import get_games
 from app.services.provider_wiring import build_provider_registry_from_env
 from app.services.odds_provider import LiveOddsProvider
 from app.services.dev_projection_provider import AutoGeneratingProjectionProvider
@@ -129,7 +128,7 @@ def test_map_schedule_payload_keeps_games_when_game_date_is_utc_next_day() -> No
 def test_schedule_provider_returns_empty_when_upstream_fails() -> None:
     provider = NhlScheduleProvider()
 
-    with patch("app.services.real_services.urlopen", side_effect=URLError("boom")):
+    with patch("app.services.real_services.fetch_json", side_effect=URLError("boom")):
         games = provider.fetch(date(2026, 3, 23))
 
     assert games == []
@@ -141,7 +140,7 @@ def test_schedule_provider_returns_empty_and_sets_error_for_http_403() -> None:
     url = f"{provider.base_url}/{selected_date.isoformat()}"
     forbidden = HTTPError(url=url, code=403, msg="Forbidden", hdrs=None, fp=None)
 
-    with patch("app.services.real_services.urlopen", side_effect=forbidden):
+    with patch("app.services.real_services.fetch_json", side_effect=forbidden):
         games = provider.fetch(selected_date)
 
     assert games == []
@@ -172,34 +171,66 @@ def test_schedule_provider_fetch_uses_browser_headers_and_parses_payload() -> No
     }
     seen = {}
 
-    class _FakeResponse(io.StringIO):
-        def __init__(self, raw_payload: dict) -> None:
-            super().__init__(json.dumps(raw_payload))
+    def _fake_fetch_json(*, url: str, headers: dict, timeout_seconds: int, opener):  # noqa: ANN001
+        seen["url"] = url
+        seen["headers"] = headers
+        seen["timeout_seconds"] = timeout_seconds
+        seen["opener"] = opener
+        return payload
 
-        def getcode(self) -> int:
-            return 200
-
-        def __enter__(self) -> "_FakeResponse":
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:
-            self.close()
-
-    def _fake_urlopen(request, timeout: int):  # noqa: ANN001
-        seen["request"] = request
-        seen["timeout"] = timeout
-        return _FakeResponse(payload)
-
-    with patch("app.services.real_services.urlopen", side_effect=_fake_urlopen):
+    with patch("app.services.real_services.fetch_json", side_effect=_fake_fetch_json):
         games = provider.fetch(selected_date)
 
-    request = seen["request"]
-    assert request.full_url == "https://api-web.nhle.com/v1/schedule/2026-03-23"
-    assert request.get_header("User-agent") is not None
-    assert "Mozilla/5.0" in request.get_header("User-agent")
-    assert request.get_header("Accept") == "application/json"
-    assert seen["timeout"] == 10
+    assert seen["url"] == "https://api-web.nhle.com/v1/schedule/2026-03-23"
+    assert seen["headers"]["User-Agent"] is not None
+    assert "Mozilla/5.0" in seen["headers"]["User-Agent"]
+    assert seen["headers"]["Accept"] == "application/json, text/plain, */*"
+    assert seen["timeout_seconds"] == 10
+    assert seen["opener"] is not None
     assert len(games) == 1
+
+
+def test_map_schedule_payload_keeps_games_in_reasonable_window_from_selected_date() -> None:
+    payload = {
+        "gameWeek": [
+            {
+                "date": "2026-03-24",
+                "games": [
+                    {
+                        "id": 1,
+                        "gameDate": "2026-03-23",
+                        "startTimeUTC": "2026-03-23T23:00:00Z",
+                        "awayTeam": {"commonName": {"default": "A"}},
+                        "homeTeam": {"commonName": {"default": "B"}},
+                    },
+                    {
+                        "id": 2,
+                        "gameDate": "2026-03-24",
+                        "startTimeUTC": "2026-03-24T23:00:00Z",
+                        "awayTeam": {"commonName": {"default": "C"}},
+                        "homeTeam": {"commonName": {"default": "D"}},
+                    },
+                    {
+                        "id": 3,
+                        "gameDate": "2026-03-25",
+                        "startTimeUTC": "2026-03-25T01:00:00Z",
+                        "awayTeam": {"commonName": {"default": "E"}},
+                        "homeTeam": {"commonName": {"default": "F"}},
+                    },
+                    {
+                        "id": 4,
+                        "gameDate": "2026-03-27",
+                        "startTimeUTC": "2026-03-27T01:00:00Z",
+                        "awayTeam": {"commonName": {"default": "G"}},
+                        "homeTeam": {"commonName": {"default": "H"}},
+                    },
+                ],
+            }
+        ]
+    }
+
+    games = _map_schedule_payload(payload, selected_date=date(2026, 3, 24))
+    assert {game.game_id for game in games} == {"1", "2", "3"}
 
 
 def test_registry_real_mode_uses_live_schedule_provider() -> None:
@@ -210,3 +241,70 @@ def test_registry_real_mode_uses_live_schedule_provider() -> None:
 
     assert isinstance(registry.projection_provider, AutoGeneratingProjectionProvider)
     assert isinstance(registry.odds_provider, LiveOddsProvider)
+
+
+def test_registry_real_mode_disables_auto_projection_dev_fallback_by_default() -> None:
+    def _fake_getenv(key: str, default=None):  # noqa: ANN001
+        if key == "BACKEND_PROVIDER_MODE":
+            return "real"
+        if key == "AUTO_PROJECTION_DEV_FALLBACK":
+            return "1"
+        return default
+
+    with patch("app.services.provider_wiring.os.getenv", side_effect=_fake_getenv):
+        registry = build_provider_registry_from_env()
+
+    assert isinstance(registry.projection_provider, AutoGeneratingProjectionProvider)
+    assert registry.projection_provider._enable_dev_fallback is False  # noqa: SLF001
+
+
+def test_real_mode_uses_nhl_rosters_and_nhl_player_ids_without_dev_ids() -> None:
+    selected_date = date(2026, 3, 24)
+
+    def _fake_getenv(key: str, default=None):  # noqa: ANN001
+        if key == "BACKEND_PROVIDER_MODE":
+            return "real"
+        return default
+
+    def _fake_fetch_json(*, url: str, headers=None, timeout_seconds=10, opener=None):  # noqa: ANN001
+        if url.endswith("/schedule/2026-03-24"):
+            return {
+                "gameWeek": [
+                    {
+                        "date": "2026-03-24",
+                        "games": [
+                            {
+                                "id": 2026020001,
+                                "gameDate": "2026-03-24",
+                                "startTimeUTC": "2026-03-24T23:00:00Z",
+                                "gameState": "FUT",
+                                "awayTeam": {"commonName": {"default": "NY Rangers"}},
+                                "homeTeam": {"commonName": {"default": "Boston Bruins"}},
+                            }
+                        ],
+                    }
+                ]
+            }
+        if "/roster/NYR/current" in url:
+            return {"forwards": [{"id": 8479323, "firstName": {"default": "Artemi"}, "lastName": {"default": "Panarin"}}]}
+        if "/roster/BOS/current" in url:
+            return {"forwards": [{"id": 8477956, "firstName": {"default": "David"}, "lastName": {"default": "Pastrnak"}}]}
+        if "/player/8479323/game-log/" in url:
+            return {"gameLog": [{"firstGoals": 1}]}
+        if "/player/8477956/game-log/" in url:
+            return {"gameLog": [{"firstGoals": 1}]}
+        return {}
+
+    with patch("app.services.provider_wiring.os.getenv", side_effect=_fake_getenv):
+        registry = build_provider_registry_from_env()
+
+    with patch("app.services.real_services.fetch_json", side_effect=_fake_fetch_json), patch(
+        "app.services.nhl_api_data.fetch_json", side_effect=_fake_fetch_json
+    ):
+        response = get_games(date=selected_date, providers=registry)
+
+    assert response.games
+    for game in response.games:
+        for leader in (game.away_top_projected_scorer, game.home_top_projected_scorer):
+            assert leader is not None
+            assert not leader.player_id.startswith("dev-")

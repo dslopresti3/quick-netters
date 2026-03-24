@@ -5,9 +5,10 @@ import logging
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Protocol
 
 from app.api.schemas import GameSummary
+from app.services.nhl_api_data import fetch_player_first_goal_history, fetch_team_roster_current, team_abbrev_for_name
 from app.services.interfaces import (
     PlayerHistoricalProduction,
     PlayerProjectionCandidate,
@@ -17,6 +18,13 @@ from app.services.interfaces import (
 )
 
 logger = logging.getLogger(__name__)
+
+HistoryLoader = Callable[[date, set[str], Path], dict[str, PlayerHistoricalProduction]]
+
+
+class ActiveRosterSource(Protocol):
+    def active_players_for_team(self, team_name: str) -> list[ActiveRosterPlayer]:
+        ...
 
 
 @dataclass(frozen=True)
@@ -80,6 +88,29 @@ class ActiveRosterRepository:
         return loaded
 
 
+class NhlApiActiveRosterRepository:
+    """Loads active roster directly from NHL API roster endpoint."""
+
+    def active_players_for_team(self, team_name: str) -> list[ActiveRosterPlayer]:
+        team_abbrev = team_abbrev_for_name(team_name)
+        if team_abbrev is None:
+            logger.warning("No NHL team abbreviation mapping found", extra={"team_name": team_name})
+            return []
+
+        roster_players = fetch_team_roster_current(team_abbrev=team_abbrev)
+        rows: list[ActiveRosterPlayer] = []
+        for player in roster_players:
+            rows.append(
+                ActiveRosterPlayer(
+                    player_id=player.player_id,
+                    player_name=player.player_name,
+                    active_team_name=team_name,
+                    is_active_roster=True,
+                )
+            )
+        return rows
+
+
 @dataclass(frozen=True)
 class _ProjectionTemplate:
     base_probability: float
@@ -96,25 +127,34 @@ class AutoGeneratingProjectionProvider(ProjectionProvider):
         self,
         schedule_provider: ScheduleProvider,
         artifact_path: Path,
-        roster_repository: ActiveRosterRepository,
+        roster_repository: ActiveRosterSource,
         *,
         enable_dev_fallback: bool = False,
+        history_loader: HistoryLoader | None = None,
     ) -> None:
         self._schedule_provider = schedule_provider
         self._artifact_path = artifact_path
         self._roster_repository = roster_repository
         self._enable_dev_fallback = enable_dev_fallback
+        self._history_loader = history_loader or _load_player_first_goal_history_from_artifact
 
     def fetch_player_first_goal_projections(self, selected_date: date) -> list[PlayerProjectionCandidate]:
         scheduled_games = self._schedule_provider.fetch(selected_date)
         if not scheduled_games:
             return []
 
-        player_history = _load_player_first_goal_history(self._artifact_path)
-
-        generated = _generate_candidates_from_active_rosters(
+        eligible_player_pool = _build_eligible_player_pool(
             scheduled_games=scheduled_games,
             roster_repository=self._roster_repository,
+        )
+        player_history = self._history_loader(
+            selected_date,
+            {candidate.player.player_id for candidate in eligible_player_pool},
+            self._artifact_path,
+        )
+
+        generated = _generate_candidates_from_eligible_player_pool(
+            eligible_player_pool=eligible_player_pool,
             player_history=player_history,
         )
 
@@ -130,71 +170,71 @@ class AutoGeneratingProjectionProvider(ProjectionProvider):
         return []
 
 
-def _generate_candidates_from_active_rosters(
+@dataclass(frozen=True)
+class _EligiblePlayerCandidate:
+    game_id: str
+    projected_team_name: str
+    player: ActiveRosterPlayer
+
+
+def _build_eligible_player_pool(
     scheduled_games: list[GameSummary],
-    roster_repository: ActiveRosterRepository,
-    player_history: dict[str, PlayerHistoricalProduction],
-) -> list[PlayerProjectionCandidate]:
-    rows: list[PlayerProjectionCandidate] = []
+    roster_repository: ActiveRosterSource,
+) -> list[_EligiblePlayerCandidate]:
+    pool: list[_EligiblePlayerCandidate] = []
     for game in scheduled_games:
-        rows.extend(
-            _project_team_candidates(
-                game_id=game.game_id,
-                team_name=game.away_team,
-                roster_repository=roster_repository,
-                player_history=player_history,
+        for team_name in (game.away_team, game.home_team):
+            players = roster_repository.active_players_for_team(team_name)
+            ranked = sorted(
+                players,
+                key=lambda p: (
+                    p.historical_season_first_goals or 0.0,
+                    (p.historical_season_first_goals or 0.0) / max((p.historical_season_games_played or 82.0), 1.0),
+                    p.player_name,
+                ),
+                reverse=True,
             )
-        )
-        rows.extend(
-            _project_team_candidates(
-                game_id=game.game_id,
-                team_name=game.home_team,
-                roster_repository=roster_repository,
-                player_history=player_history,
-            )
-        )
-    return rows
+            for player in ranked:
+                pool.append(
+                    _EligiblePlayerCandidate(
+                        game_id=game.game_id,
+                        projected_team_name=team_name,
+                        player=player,
+                    )
+                )
+    return pool
 
 
-def _project_team_candidates(
-    game_id: str,
-    team_name: str,
-    roster_repository: ActiveRosterRepository,
+def _generate_candidates_from_eligible_player_pool(
+    eligible_player_pool: list[_EligiblePlayerCandidate],
     player_history: dict[str, PlayerHistoricalProduction],
     template: _ProjectionTemplate = _DEFAULT_TEMPLATE,
 ) -> list[PlayerProjectionCandidate]:
-    players = roster_repository.active_players_for_team(team_name)
-    ranked = sorted(
-        players,
-        key=lambda p: (
-            p.historical_season_first_goals or 0.0,
-            (p.historical_season_first_goals or 0.0) / max((p.historical_season_games_played or 82.0), 1.0),
-            p.player_name,
-        ),
-        reverse=True,
-    )
-
     rows: list[PlayerProjectionCandidate] = []
-    for idx, player in enumerate(ranked):
-        probability = max(template.base_probability - (idx * template.decrement_per_rank), 0.01)
+    rank_by_game_team: dict[tuple[str, str], int] = {}
+    for candidate in eligible_player_pool:
+        rank_key = (candidate.game_id, candidate.projected_team_name)
+        rank = rank_by_game_team.get(rank_key, 0)
+        rank_by_game_team[rank_key] = rank + 1
+        probability = max(template.base_probability - (rank * template.decrement_per_rank), 0.01)
         player_historical = player_history.get(
-            player.player_id,
+            candidate.player.player_id,
             PlayerHistoricalProduction(
-                season_first_goals=player.historical_season_first_goals,
-                season_games_played=player.historical_season_games_played,
+                season_first_goals=candidate.player.historical_season_first_goals,
+                season_games_played=candidate.player.historical_season_games_played,
             ),
         )
         rows.append(
             PlayerProjectionCandidate(
-                game_id=game_id,
-                nhl_player_id=player.player_id,
-                player_name=player.player_name,
-                projected_team_name=team_name,
+                game_id=candidate.game_id,
+                nhl_player_id=candidate.player.player_id,
+                player_name=candidate.player.player_name,
+                projected_team_name=candidate.projected_team_name,
                 model_probability=round(probability, 4),
                 historical_production=player_historical,
                 roster_eligibility=PlayerRosterEligibility(
-                    active_team_name=player.active_team_name,
-                    is_active_roster=player.is_active_roster,
+                    active_team_name=candidate.player.active_team_name,
+                    is_active_roster=candidate.player.is_active_roster,
                 ),
             )
         )
@@ -275,7 +315,13 @@ def _load_artifact(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _load_player_first_goal_history(path: Path) -> dict[str, PlayerHistoricalProduction]:
+def _load_player_first_goal_history_from_artifact(
+    selected_date: date,
+    eligible_player_ids: set[str],
+    path: Path,
+) -> dict[str, PlayerHistoricalProduction]:
+    if not eligible_player_ids:
+        return {}
     payload = _load_artifact(path)
     projections = payload.get("projections")
     if not isinstance(projections, list):
@@ -289,6 +335,8 @@ def _load_player_first_goal_history(path: Path) -> dict[str, PlayerHistoricalPro
         if not isinstance(raw_player_id, str) or not raw_player_id.strip():
             continue
         player_id = raw_player_id.strip()
+        if player_id not in eligible_player_ids:
+            continue
         first_goals = _as_float(row.get("historical_season_first_goals"))
         games_played = _as_float(row.get("historical_season_games_played"))
         if first_goals is None and games_played is None:
@@ -305,6 +353,17 @@ def _load_player_first_goal_history(path: Path) -> dict[str, PlayerHistoricalPro
             season_first_goals=max(_history_value(current.season_first_goals), _history_value(first_goals)),
             season_games_played=max(_history_value(current.season_games_played), _history_value(games_played)),
         )
+    return history
+
+
+def load_player_first_goal_history_from_nhl_api(
+    selected_date: date,
+    eligible_player_ids: set[str],
+    path: Path,  # noqa: ARG001
+) -> dict[str, PlayerHistoricalProduction]:
+    history: dict[str, PlayerHistoricalProduction] = {}
+    for player_id in eligible_player_ids:
+        history[player_id] = fetch_player_first_goal_history(player_id=player_id, selected_date=selected_date)
     return history
 
 

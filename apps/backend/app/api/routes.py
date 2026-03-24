@@ -57,6 +57,14 @@ def _build_date_availability(selected_date: date, providers: ProviderRegistry) -
                 "Date availability has no schedule due to upstream fetch failure",
                 extra={"selected_date": selected_date.isoformat(), "note": schedule_fetch_failure_note},
             )
+            messages = [
+                "Upstream schedule fetch failed for this date.",
+                schedule_fetch_failure_note,
+            ]
+        else:
+            messages = [
+                "No scheduled games are currently published for this date.",
+            ]
         return DateAvailabilityResponse(
             selected_date=selected_date,
             min_allowed_date=window.min_allowed_date,
@@ -66,10 +74,7 @@ def _build_date_availability(selected_date: date, providers: ProviderRegistry) -
             projections_available=False,
             odds_available=False,
             status="no_schedule",
-            messages=[
-                "No scheduled games are currently published for this date.",
-                *( [schedule_fetch_failure_note] if schedule_fetch_failure_note is not None else [] ),
-            ],
+            messages=messages,
         )
 
     projections_available = providers.recommendation_service.projections_available(selected_date)
@@ -138,6 +143,9 @@ def get_games(
 ) -> GamesResponse:
     ensure_date_not_more_than_one_day_ahead(date)
     games = providers.schedule_provider.fetch(date)
+    schedule_fetch_failure_note = _schedule_fetch_failure_note(providers)
+    if schedule_fetch_failure_note is not None and len(games) == 0:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=schedule_fetch_failure_note)
     logger.info(
         "Games fetched before recommendation attachment",
         extra={"selected_date": date.isoformat(), "games_count_before_recommendation_attachment": len(games)},
@@ -159,7 +167,6 @@ def get_games(
         if not odds_available:
             notes.append("Market odds are not available for this date yet. Value picks will appear once odds are posted.")
 
-    schedule_fetch_failure_note = _schedule_fetch_failure_note(providers)
     if schedule_fetch_failure_note is not None:
         notes.append(schedule_fetch_failure_note)
         logger.warning(

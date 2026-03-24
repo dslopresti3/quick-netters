@@ -402,3 +402,111 @@ def test_traded_player_uses_player_owned_first_goal_history_but_only_current_tea
     assert rantanen.roster_eligibility.active_team_name == "Dallas Stars"
     assert rantanen.projected_team_name == "Dallas Stars"
     assert rantanen.historical_production.season_first_goals == 9
+
+
+def test_real_mode_projection_pipeline_order_is_schedule_then_roster_then_history_then_projection(tmp_path) -> None:
+    calls: list[str] = []
+    selected_date = date(2026, 3, 24)
+    schedule_provider = _RecordingScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026032401",
+                    game_time=datetime(2026, 3, 24, 23, 0, tzinfo=timezone.utc),
+                    away_team="NY Rangers",
+                    home_team="Boston Bruins",
+                )
+            ]
+        },
+        calls=calls,
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(
+        json.dumps(
+            {
+                "players": [
+                    {"player_id": "8479323", "player_name": "Artemi Panarin", "active_team_name": "NY Rangers", "is_active_roster": True},
+                    {"player_id": "8477956", "player_name": "David Pastrnak", "active_team_name": "Boston Bruins", "is_active_roster": True},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    artifact = tmp_path / "projections.json"
+    _write_artifact(artifact, [])
+    def _recording_history_loader(selected_date, eligible_player_ids, path):  # noqa: ANN001
+        calls.append("history")
+        from app.services.dev_projection_provider import _load_player_first_goal_history_from_artifact
+
+        return _load_player_first_goal_history_from_artifact(selected_date=selected_date, eligible_player_ids=eligible_player_ids, path=path)
+
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=_RecordingRosterRepository(roster_path=roster_path, calls=calls),
+        history_loader=_recording_history_loader,
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+
+    assert rows
+    assert calls[0] == "schedule"
+    assert "roster" in calls
+    assert calls.index("history") > calls.index("roster")
+
+
+def test_history_load_is_filtered_to_active_roster_eligible_player_ids(tmp_path) -> None:
+    selected_date = date(2026, 3, 24)
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026032401",
+                    game_time=datetime(2026, 3, 24, 23, 0, tzinfo=timezone.utc),
+                    away_team="NY Rangers",
+                    home_team="Boston Bruins",
+                )
+            ]
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(
+        json.dumps(
+            {
+                "players": [
+                    {"player_id": "8479323", "player_name": "Artemi Panarin", "active_team_name": "NY Rangers", "is_active_roster": True},
+                    {"player_id": "8477956", "player_name": "David Pastrnak", "active_team_name": "Boston Bruins", "is_active_roster": True},
+                    {"player_id": "inactive", "player_name": "Inactive Skater", "active_team_name": "NY Rangers", "is_active_roster": False},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {"date": "2026-03-20", "nhl_player_id": "8479323", "historical_season_first_goals": 8},
+            {"date": "2026-03-20", "nhl_player_id": "8477956", "historical_season_first_goals": 9},
+            {"date": "2026-03-20", "nhl_player_id": "old-not-eligible", "historical_season_first_goals": 99},
+        ],
+    )
+    seen_ids: set[str] = set()
+
+    def _capturing_history_loader(selected_date, eligible_player_ids, path):  # noqa: ANN001
+        seen_ids.update(eligible_player_ids)
+        from app.services.dev_projection_provider import _load_player_first_goal_history_from_artifact
+
+        return _load_player_first_goal_history_from_artifact(selected_date=selected_date, eligible_player_ids=eligible_player_ids, path=path)
+
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=ActiveRosterRepository(roster_path=roster_path),
+        history_loader=_capturing_history_loader,
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+
+    assert rows
+    assert seen_ids == {"8479323", "8477956"}
