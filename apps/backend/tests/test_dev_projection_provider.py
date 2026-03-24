@@ -703,6 +703,99 @@ def test_top_projected_players_are_plausible_forwards(tmp_path) -> None:
     assert leafs_rows[0].player_name == "Auston Matthews"
 
 
+def test_team_layer_probabilities_favor_stronger_offense_and_weaker_opponent_defense(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(artifact, [])
+    selected_date = date(2026, 3, 24)
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026032404",
+                    game_time=datetime(2026, 3, 24, 23, 0, tzinfo=timezone.utc),
+                    away_team="High Octane",
+                    home_team="Low Event",
+                )
+            ]
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(
+        json.dumps(
+            {
+                "players": [
+                    {"player_id": "ho-1", "player_name": "High One", "active_team_name": "High Octane", "is_active_roster": True, "position_code": "C"},
+                    {"player_id": "ho-2", "player_name": "High Two", "active_team_name": "High Octane", "is_active_roster": True, "position_code": "LW"},
+                    {"player_id": "le-1", "player_name": "Low One", "active_team_name": "Low Event", "is_active_roster": True, "position_code": "C"},
+                    {"player_id": "le-2", "player_name": "Low Two", "active_team_name": "Low Event", "is_active_roster": True, "position_code": "LW"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    history = {
+        "ho-1": PlayerHistoricalProduction(season_first_goals=8, season_total_goals=42, season_total_shots=250, season_games_played=70, season_first_period_goals=10),
+        "ho-2": PlayerHistoricalProduction(season_first_goals=6, season_total_goals=34, season_total_shots=210, season_games_played=70, season_first_period_goals=8),
+        "le-1": PlayerHistoricalProduction(season_first_goals=2, season_total_goals=14, season_total_shots=120, season_games_played=70, season_first_period_goals=2),
+        "le-2": PlayerHistoricalProduction(season_first_goals=1, season_total_goals=9, season_total_shots=90, season_games_played=70, season_first_period_goals=1),
+    }
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=ActiveRosterRepository(roster_path=roster_path),
+        history_loader=lambda _date, _ids, _path: history,
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+
+    high_team_prob = sum(row.model_probability for row in rows if row.projected_team_name == "High Octane")
+    low_team_prob = sum(row.model_probability for row in rows if row.projected_team_name == "Low Event")
+    assert high_team_prob > low_team_prob
+
+
+def test_no_placeholder_rows_emitted_in_real_mode(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(artifact, [])
+    selected_date = date(2026, 3, 24)
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026032405",
+                    game_time=datetime(2026, 3, 24, 23, 0, tzinfo=timezone.utc),
+                    away_team="NY Rangers",
+                    home_team="Boston Bruins",
+                )
+            ]
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(
+        json.dumps(
+            {
+                "players": [
+                    {"player_id": "8479323", "player_name": "Artemi Panarin", "active_team_name": "NY Rangers", "is_active_roster": True, "position_code": "LW"},
+                    {"player_id": "8477956", "player_name": "David Pastrnak", "active_team_name": "Boston Bruins", "is_active_roster": True, "position_code": "RW"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=ActiveRosterRepository(roster_path=roster_path),
+        enable_dev_fallback=False,
+        history_loader=lambda _date, _ids, _path: {},
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+
+    assert rows
+    assert all(not row.nhl_player_id.startswith("dev-") for row in rows)
+    assert all("Skater" not in row.player_name for row in rows)
+
+
 def test_history_loader_fetches_live_history_by_default_when_missing(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("NHL_HISTORY_MAX_LIVE_REQUESTS_PER_GAMES", raising=False)
     monkeypatch.delenv("NHL_HISTORY_MAX_LIVE_REQUESTS_PER_GAME", raising=False)
