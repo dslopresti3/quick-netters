@@ -17,6 +17,7 @@ class TheOddsApiClient:
 
     base_url = "https://api.the-odds-api.com/v4/sports/icehockey_nhl/odds"
     provider_name = "the-odds-api"
+    first_goal_market_key = "player_goal_scorer_first"
 
     def __init__(self, api_key: str | None = None, timeout_seconds: int = 10) -> None:
         self._api_key = api_key or os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY")
@@ -32,7 +33,7 @@ class TheOddsApiClient:
             {
                 "apiKey": self._api_key,
                 "regions": "us",
-                "markets": "player_first_goal_scorer",
+                "markets": self.first_goal_market_key,
                 "oddsFormat": "american",
                 "dateFormat": "iso",
                 "commenceTimeFrom": window_start.isoformat(),
@@ -54,7 +55,7 @@ class TheOddsApiClient:
 class TheOddsApiAdapter:
     """Normalize The Odds API payloads into app-internal odds snapshots."""
 
-    market_key = "player_first_goal_scorer"
+    market_key = TheOddsApiClient.first_goal_market_key
 
     def __init__(self, source_name: str, stale_threshold: timedelta = STALE_ODDS_THRESHOLD) -> None:
         self._source_name = source_name

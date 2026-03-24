@@ -127,7 +127,7 @@ class _StubRawOddsClient:
                         "key": "draftkings",
                         "markets": [
                             {
-                                "key": "player_first_goal_scorer",
+                                "key": "player_goal_scorer_first",
                                 "last_update": datetime.now(timezone.utc).isoformat(),
                                 "outcomes": [{"name": "Injected Player", "description": "Custom Home", "price": 250}],
                             }
