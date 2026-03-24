@@ -230,6 +230,22 @@ def test_odds_mapping_does_not_require_provider_ids_to_equal_nhl_ids() -> None:
     assert recs[0].player_id == "847123"
 
 
+def test_team_alias_mapping_is_populated_before_event_match_for_utah_rename() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026020002", game_time=game_time, away_team="Utah Mammoth", home_team="Boston Bruins")
+    projections = [_projection("2026020002", "847999", "Clayton Keller", "Utah Mammoth", "Utah Mammoth")]
+    odds_rows = [_raw_odds("Clayton Keller", "Utah Hockey Club", "Boston Bruins", game_time, team="Utah")]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    assert service.odds_available(selected_date) is True
+
+
 def test_recommendations_fetch_projections_before_odds_and_require_projections_first() -> None:
     selected_date = date.today()
     game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
