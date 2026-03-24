@@ -13,6 +13,7 @@ __pycache__/
 # Env files
 .env
 .env.local
+apps/backend/.env
 
 # OS
 .DS_Store
