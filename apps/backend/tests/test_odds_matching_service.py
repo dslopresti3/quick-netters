@@ -121,6 +121,63 @@ def test_player_mapping_by_team_and_name_aliases() -> None:
     assert recs[0].player_id == "847123"
 
 
+def test_player_mapping_supports_last_first_book_format_with_team_suffix() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026021001", game_time=game_time, away_team="Toronto Maple Leafs", home_team="Florida Panthers")
+    projections = [_projection("2026021001", "8479318", "Auston Matthews", "Toronto Maple Leafs", "Toronto Maple Leafs")]
+    odds_rows = [_raw_odds("Matthews, Auston (TOR)", "Toronto Maple Leafs", "Florida Panthers", game_time, team="Toronto")]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    recs = service.fetch_daily(selected_date)
+    assert len(recs) == 1
+    assert recs[0].player_id == "8479318"
+
+
+def test_player_mapping_supports_punctuation_differences() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026021002", game_time=game_time, away_team="Boston Bruins", home_team="NY Rangers")
+    projections = [_projection("2026021002", "player-smith-jones", "Jake Smith-Jones", "Boston Bruins", "Boston Bruins")]
+    odds_rows = [_raw_odds("J. Smith Jones", "Boston Bruins", "NY Rangers", game_time, team="Boston")]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    recs = service.fetch_daily(selected_date)
+    assert len(recs) == 1
+    assert recs[0].player_id == "player-smith-jones"
+
+
+def test_player_mapping_uses_team_context_to_disambiguate_shared_name_aliases() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026021003", game_time=game_time, away_team="Carolina Hurricanes", home_team="NY Islanders")
+    projections = [
+        _projection("2026021003", "car-sebastian-aho", "Sebastian Aho", "Carolina Hurricanes", "Carolina Hurricanes"),
+        _projection("2026021003", "nyi-sebastian-aho", "Sebastian Aho", "NY Islanders", "NY Islanders"),
+    ]
+    odds_rows = [_raw_odds("S. Aho", "Carolina Hurricanes", "NY Islanders", game_time, team="Carolina")]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    recs = service.fetch_daily(selected_date)
+    assert len(recs) == 1
+    assert recs[0].player_id == "car-sebastian-aho"
+
+
 def test_active_roster_only_eligibility_and_traded_player_behavior() -> None:
     selected_date = date.today()
     game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
