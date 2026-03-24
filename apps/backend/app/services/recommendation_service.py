@@ -442,19 +442,27 @@ def _match_player_to_projection(
         # In those cases, enforcing team context eliminates all valid player candidates.
         apply_team_context_filter = False
 
-    candidates: list[PlayerProjectionCandidate] = []
+    scored_candidates: list[tuple[float, PlayerProjectionCandidate]] = []
     for projection in projections:
         if not projection.roster_eligibility.is_active_roster:
             continue
-        if apply_team_context_filter and team_context_tokens.isdisjoint(
-            team_alias_tokens(projection.roster_eligibility.active_team_name)
-        ):
+        projection_team_tokens = team_alias_tokens(projection.roster_eligibility.active_team_name)
+        if apply_team_context_filter and team_context_tokens.isdisjoint(projection_team_tokens):
             continue
-        if provider_aliases.isdisjoint(name_aliases(projection.player_name)):
+        projection_aliases = name_aliases(projection.player_name)
+        if provider_aliases.isdisjoint(projection_aliases):
             continue
-        candidates.append(projection)
+        score = _player_candidate_match_score(
+            provider_player_name_raw=player_name_raw,
+            provider_aliases=provider_aliases,
+            projection=projection,
+            projection_aliases=projection_aliases,
+            projection_team_tokens=projection_team_tokens,
+            team_context_tokens=team_context_tokens,
+        )
+        scored_candidates.append((score, projection))
 
-    if len(candidates) != 1:
+    if not scored_candidates:
         return OddsPlayerMapping(
             provider_name=provider_name,
             provider_player_id=row.provider_player_id,
@@ -463,15 +471,27 @@ def _match_player_to_projection(
             nhl_player_id=None,
             nhl_player_name=None,
             nhl_team=None,
-            match_status="unmatched" if not candidates else "ambiguous",
-            match_confidence=0.0 if not candidates else 0.4,
+            match_status="unmatched",
+            match_confidence=0.0,
             matched_at=matched_at,
         )
-
-    player = candidates[0]
-    confidence = 0.8
-    if normalize_name(player.player_name) == normalize_name(player_name_raw):
-        confidence = 1.0
+    scored_candidates.sort(key=lambda item: item[0], reverse=True)
+    best_score, player = scored_candidates[0]
+    top_tied = [candidate for score, candidate in scored_candidates if score == best_score]
+    if len(top_tied) > 1:
+        return OddsPlayerMapping(
+            provider_name=provider_name,
+            provider_player_id=row.provider_player_id,
+            provider_player_name_raw=player_name_raw,
+            provider_team_raw=provider_team_raw,
+            nhl_player_id=None,
+            nhl_player_name=None,
+            nhl_team=None,
+            match_status="ambiguous",
+            match_confidence=0.4,
+            matched_at=matched_at,
+        )
+    confidence = min(max(best_score, 0.5), 1.0)
     return OddsPlayerMapping(
         provider_name=provider_name,
         provider_player_id=row.provider_player_id,
@@ -484,6 +504,34 @@ def _match_player_to_projection(
         match_confidence=confidence,
         matched_at=matched_at,
     )
+
+
+def _player_candidate_match_score(
+    provider_player_name_raw: str,
+    provider_aliases: set[str],
+    projection: PlayerProjectionCandidate,
+    projection_aliases: set[str],
+    projection_team_tokens: set[str],
+    team_context_tokens: set[str],
+) -> float:
+    score = 0.5
+    normalized_provider_name = normalize_name(provider_player_name_raw)
+    normalized_projection_name = normalize_name(projection.player_name)
+
+    if normalized_provider_name == normalized_projection_name:
+        score += 0.4
+    else:
+        shared_aliases = provider_aliases & projection_aliases
+        if shared_aliases:
+            longest_alias = max(len(alias) for alias in shared_aliases)
+            score += min(0.3, longest_alias / 50)
+        if normalized_provider_name.replace(" ", "") == normalized_projection_name.replace(" ", ""):
+            score += 0.2
+
+    if team_context_tokens and not team_context_tokens.isdisjoint(projection_team_tokens):
+        score += 0.1
+
+    return round(score, 4)
 
 
 def _latest_snapshot_for_player(

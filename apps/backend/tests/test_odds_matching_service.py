@@ -186,6 +186,28 @@ def test_player_mapping_uses_team_context_to_disambiguate_shared_name_aliases() 
     assert recs[0].player_id == "car-sebastian-aho"
 
 
+def test_player_mapping_prefers_best_alias_match_from_full_game_candidate_pool() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026021010", game_time=game_time, away_team="Washington Capitals", home_team="Boston Bruins")
+    projections = [
+        _projection("2026021010", "wash-jake-guentzel", "Jake Guentzel", "Washington Capitals", "Washington Capitals"),
+        _projection("2026021010", "wash-john-carlson", "John Carlson", "Washington Capitals", "Washington Capitals"),
+        _projection("2026021010", "bos-jake-debrusk", "Jake DeBrusk", "Boston Bruins", "Boston Bruins"),
+    ]
+    odds_rows = [_raw_odds("Jake Guentzel", "Washington Capitals", "Boston Bruins", game_time, team="Washington")]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    recs = service.fetch_daily(selected_date)
+    assert len(recs) == 1
+    assert recs[0].player_id == "wash-jake-guentzel"
+
+
 def test_player_mapping_ignores_non_team_bookmaker_description_context() -> None:
     selected_date = date.today()
     game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
