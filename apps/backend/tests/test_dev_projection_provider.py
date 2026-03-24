@@ -212,3 +212,84 @@ def test_only_active_roster_players_and_current_team_eligibility_are_generated(t
     assert rantanen.projected_team_name == "Dallas Stars"
     assert rantanen.roster_eligibility.active_team_name == "Dallas Stars"
     assert all(row.player_name != "Inactive Depth" for row in rows)
+
+
+def test_replaces_stale_dev_placeholder_rows_with_real_generated_rows(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {
+                "date": "2026-03-24",
+                "game_id": "2025021120",
+                "nhl_player_id": "dev-2025021120-away-maple-leafs-1",
+                "player_name": "Maple Leafs Skater A",
+                "team_name": "Toronto Maple Leafs",
+                "active_team_name": "Toronto Maple Leafs",
+                "is_active_roster": True,
+                "model_probability": 0.16,
+            },
+            {
+                "date": "2026-03-24",
+                "game_id": "2025021120",
+                "nhl_player_id": "dev-2025021120-home-bruins-1",
+                "player_name": "Boston Bruins Skater A",
+                "team_name": "Boston Bruins",
+                "active_team_name": "Boston Bruins",
+                "is_active_roster": True,
+                "model_probability": 0.16,
+            },
+        ],
+    )
+    selected_date = date(2026, 3, 24)
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2025021120",
+                    game_time=datetime(2026, 3, 24, 23, 0, tzinfo=timezone.utc),
+                    away_team="Toronto Maple Leafs",
+                    home_team="Boston Bruins",
+                )
+            ]
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(
+        json.dumps(
+            {
+                "players": [
+                    {"player_id": "8477939", "player_name": "Auston Matthews", "active_team_name": "Toronto Maple Leafs", "is_active_roster": True, "historical_season_first_goals": 10, "historical_season_games_played": 81},
+                    {"player_id": "8478402", "player_name": "Mitch Marner", "active_team_name": "Toronto Maple Leafs", "is_active_roster": True, "historical_season_first_goals": 8, "historical_season_games_played": 82},
+                    {"player_id": "8477956", "player_name": "David Pastrnak", "active_team_name": "Boston Bruins", "is_active_roster": True, "historical_season_first_goals": 9, "historical_season_games_played": 82},
+                    {"player_id": "8473419", "player_name": "Brad Marchand", "active_team_name": "Boston Bruins", "is_active_roster": True, "historical_season_first_goals": 6, "historical_season_games_played": 78}
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    provider = AutoGeneratingProjectionProvider(
+        base_provider=StoreBackedProjectionProvider(store=JsonArtifactProjectionStore(artifact)),
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=ActiveRosterRepository(roster_path=roster_path),
+        enable_dev_fallback=True,
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+
+    assert rows
+    assert all(not row.nhl_player_id.startswith("dev-") for row in rows)
+    assert {row.player_name for row in rows} == {
+        "Auston Matthews",
+        "Mitch Marner",
+        "David Pastrnak",
+        "Brad Marchand",
+    }
+
+    persisted = json.loads(artifact.read_text(encoding="utf-8"))["projections"]
+    rows_24 = [row for row in persisted if row.get("date") == "2026-03-24"]
+    assert rows_24
+    assert all(not str(row.get("player_id", "")).startswith("dev-") for row in rows_24)
+    assert all("Skater" not in str(row.get("player_name", "")) for row in rows_24)
