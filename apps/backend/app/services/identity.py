@@ -53,18 +53,41 @@ def normalize_name(value: str) -> str:
 
 
 def name_aliases(value: str) -> set[str]:
-    normalized = normalize_name(value)
+    prepared = _prepare_player_name_for_aliasing(value)
+    normalized = normalize_name(prepared)
     if not normalized:
         return set()
 
     aliases = {normalized, normalized.replace(" ", "")}
     parts = [part for part in normalized.split(" ") if part]
+    if len(parts) >= 3 and len(parts[-1]) <= 3:
+        parts = parts[:-1]
     if len(parts) >= 2:
         first, last = parts[0], parts[-1]
+        aliases.add(f"{first} {last}")
+        aliases.add(f"{first}{last}")
         aliases.add(f"{first[0]} {last}")
         aliases.add(f"{first[0]}{last}")
         aliases.add(last)
     return aliases
+
+
+def _prepare_player_name_for_aliasing(value: str) -> str:
+    normalized = _normalize_ascii(value).strip().lower()
+    if not normalized:
+        return ""
+
+    # Strip contextual suffixes often present in sportsbook outcome labels.
+    normalized = re.sub(r"\([^)]*\)", " ", normalized)
+    normalized = re.sub(r"\[[^\]]*\]", " ", normalized)
+    normalized = re.sub(r"\s+-\s+[a-z]{2,4}$", " ", normalized)
+
+    # Convert "Last, First" into "First Last".
+    if "," in normalized:
+        last_name, first_name = normalized.split(",", maxsplit=1)
+        normalized = f"{first_name.strip()} {last_name.strip()}".strip()
+
+    return normalized
 
 
 TEAM_TOKEN_ALIASES: dict[str, set[str]] = {}
