@@ -112,23 +112,39 @@ class AutoGeneratingProjectionProvider(ProjectionProvider):
 
     def fetch_player_first_goal_projections(self, selected_date: date) -> list[PlayerProjectionCandidate]:
         existing = self._base_provider.fetch_player_first_goal_projections(selected_date)
-        if existing:
+        if existing and not _contains_dev_placeholder_rows(existing):
             return existing
 
         scheduled_games = self._schedule_provider.fetch(selected_date)
         if not scheduled_games:
-            return []
+            return existing if existing else []
 
         generated = _generate_candidates_from_active_rosters(
             scheduled_games=scheduled_games,
             roster_repository=self._roster_repository,
         )
 
-        if not generated and self._enable_dev_fallback:
-            generated = _generate_placeholder_candidates(scheduled_games=scheduled_games)
+        if generated:
+            _upsert_generated_rows(artifact_path=self._artifact_path, selected_date=selected_date, rows=generated)
+            return generated
 
-        _upsert_generated_rows(artifact_path=self._artifact_path, selected_date=selected_date, rows=generated)
-        return generated
+        if existing:
+            logger.warning(
+                "Retaining existing projections because active-roster generation yielded no rows",
+                extra={"selected_date": selected_date.isoformat(), "artifact_path": str(self._artifact_path)},
+            )
+            return existing
+
+        if self._enable_dev_fallback:
+            generated = _generate_placeholder_candidates(scheduled_games=scheduled_games)
+            _upsert_generated_rows(artifact_path=self._artifact_path, selected_date=selected_date, rows=generated)
+            return generated
+
+        return []
+
+
+def _contains_dev_placeholder_rows(rows: list[PlayerProjectionCandidate]) -> bool:
+    return any(row.nhl_player_id.startswith("dev-") or " skater " in row.player_name.lower() for row in rows)
 
 
 def _generate_candidates_from_active_rosters(
