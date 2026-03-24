@@ -87,7 +87,61 @@ def _prepare_player_name_for_aliasing(value: str) -> str:
         last_name, first_name = normalized.split(",", maxsplit=1)
         normalized = f"{first_name.strip()} {last_name.strip()}".strip()
 
+    normalized = _strip_bookmaker_market_suffix(normalized)
+
     return normalized
+
+
+def _strip_bookmaker_market_suffix(normalized: str) -> str:
+    separators = (" - ", " – ", " — ", "|")
+    for separator in separators:
+        if separator not in normalized:
+            continue
+        head, tail = normalized.split(separator, maxsplit=1)
+        head = head.strip()
+        tail = tail.strip()
+        if not head:
+            continue
+        if not tail:
+            return head
+        if _looks_like_market_or_team_metadata(tail):
+            return head
+    return normalized
+
+
+def _looks_like_market_or_team_metadata(value: str) -> bool:
+    compact = normalize_name(value)
+    if not compact:
+        return False
+    tokens = [token for token in compact.split(" ") if token]
+    if not tokens:
+        return False
+
+    metadata_tokens = {
+        "to",
+        "score",
+        "first",
+        "goal",
+        "goalscorer",
+        "goalcorer",
+        "anytime",
+        "player",
+        "other",
+        "team",
+        "for",
+        "the",
+    }
+    if set(tokens).issubset(metadata_tokens):
+        return True
+
+    team_tokens = team_alias_tokens(compact)
+    if team_tokens:
+        return True
+
+    if len(tokens) >= 2 and tokens[0] in {"any", "first", "to"}:
+        return True
+
+    return False
 
 
 TEAM_TOKEN_ALIASES: dict[str, set[str]] = {}

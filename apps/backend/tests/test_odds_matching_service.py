@@ -147,6 +147,24 @@ def test_player_mapping_supports_last_first_book_format_with_team_suffix() -> No
     assert recs[0].player_id == "8479318"
 
 
+def test_player_mapping_supports_market_suffix_embedded_in_bookmaker_name() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026021007", game_time=game_time, away_team="Edmonton Oilers", home_team="Calgary Flames")
+    projections = [_projection("2026021007", "8478402", "Connor McDavid", "Edmonton Oilers", "Edmonton Oilers")]
+    odds_rows = [_raw_odds("Connor McDavid - To Score First Goal", "Edmonton Oilers", "Calgary Flames", game_time, team="Edmonton")]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    recs = service.fetch_daily(selected_date)
+    assert len(recs) == 1
+    assert recs[0].player_id == "8478402"
+
+
 def test_player_mapping_supports_punctuation_differences() -> None:
     selected_date = date.today()
     game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
