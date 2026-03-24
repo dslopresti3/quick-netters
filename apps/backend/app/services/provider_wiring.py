@@ -3,9 +3,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 from app.services.interfaces import OddsProvider, ProjectionProvider, ScheduleProvider
-from app.services.dev_projection_provider import AutoGeneratingProjectionProvider
+from app.services.dev_projection_provider import ActiveRosterRepository, AutoGeneratingProjectionProvider
 from app.services.mock_services import MockGamesService, MockOddsService, MockProjectionService, ValueRecommendationService
 from app.services.odds_provider import LiveOddsProvider
 from app.services.projection_store import (
@@ -53,10 +54,13 @@ def build_provider_registry_from_env() -> ProviderRegistry:
         base_projection_provider = StoreBackedProjectionProvider(
             store=JsonArtifactProjectionStore(artifact_path=projection_source.artifact_path)
         )
+        roster_path = Path(__file__).resolve().parents[1] / "data" / "rosters" / "current_active_rosters.json"
         projection_provider = AutoGeneratingProjectionProvider(
             base_provider=base_projection_provider,
             schedule_provider=schedule_provider,
             artifact_path=projection_source.artifact_path,
+            roster_repository=ActiveRosterRepository(roster_path=roster_path),
+            enable_dev_fallback=os.getenv("AUTO_PROJECTION_DEV_FALLBACK", "0") == "1",
         )
         odds_provider = LiveOddsProvider()
 

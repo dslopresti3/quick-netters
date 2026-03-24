@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "players": [
+    {"player_id": "8479323", "player_name": "Artemi Panarin", "active_team_name": "NY Rangers", "is_active_roster": true, "historical_season_first_goals": 8, "historical_season_games_played": 82},
+    {"player_id": "8476459", "player_name": "Mika Zibanejad", "active_team_name": "NY Rangers", "is_active_roster": true, "historical_season_first_goals": 7, "historical_season_games_played": 81},
+    {"player_id": "8475184", "player_name": "Chris Kreider", "active_team_name": "NY Rangers", "is_active_roster": true, "historical_season_first_goals": 6, "historical_season_games_played": 80},
+
+    {"player_id": "8477956", "player_name": "David Pastrnak", "active_team_name": "Boston Bruins", "is_active_roster": true, "historical_season_first_goals": 9, "historical_season_games_played": 82},
+    {"player_id": "8473419", "player_name": "Brad Marchand", "active_team_name": "Boston Bruins", "is_active_roster": true, "historical_season_first_goals": 6, "historical_season_games_played": 78},
+    {"player_id": "8482089", "player_name": "Pavel Zacha", "active_team_name": "Boston Bruins", "is_active_roster": true, "historical_season_first_goals": 4, "historical_season_games_played": 80},
+
+    {"player_id": "8477492", "player_name": "Nathan MacKinnon", "active_team_name": "Colorado Avalanche", "is_active_roster": true, "historical_season_first_goals": 8, "historical_season_games_played": 82},
+    {"player_id": "8476455", "player_name": "Cale Makar", "active_team_name": "Colorado Avalanche", "is_active_roster": true, "historical_season_first_goals": 5, "historical_season_games_played": 79},
+    {"player_id": "8480820", "player_name": "Mikko Rantanen", "active_team_name": "Dallas Stars", "is_active_roster": true, "historical_season_first_goals": 7, "historical_season_games_played": 82},
+
+    {"player_id": "8478402", "player_name": "Jason Robertson", "active_team_name": "Dallas Stars", "is_active_roster": true, "historical_season_first_goals": 6, "historical_season_games_played": 81},
+    {"player_id": "8476462", "player_name": "Roope Hintz", "active_team_name": "Dallas Stars", "is_active_roster": true, "historical_season_first_goals": 5, "historical_season_games_played": 80},
+
+    {"player_id": "8477939", "player_name": "Auston Matthews", "active_team_name": "Toronto Maple Leafs", "is_active_roster": true, "historical_season_first_goals": 10, "historical_season_games_played": 81},
+    {"player_id": "8478483", "player_name": "Mitch Marner", "active_team_name": "Toronto Maple Leafs", "is_active_roster": true, "historical_season_first_goals": 4, "historical_season_games_played": 80},
+    {"player_id": "8475166", "player_name": "John Tavares", "active_team_name": "Toronto Maple Leafs", "is_active_roster": true, "historical_season_first_goals": 5, "historical_season_games_played": 79},
+
+    {"player_id": "8479318", "player_name": "Matthew Tkachuk", "active_team_name": "Florida Panthers", "is_active_roster": false, "historical_season_first_goals": 6, "historical_season_games_played": 80}
+  ]
+}
