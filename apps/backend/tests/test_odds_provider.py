@@ -1,6 +1,7 @@
 import json
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
+from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 from app.services.odds_provider import TheOddsApiAdapter, TheOddsApiClient
@@ -170,3 +171,35 @@ def test_the_odds_api_client_fetches_event_odds_from_event_endpoints() -> None:
     assert "/events?" in requested_urls[0]
     assert "/events/evt-1/odds?" in requested_urls[1]
     assert "/events/evt-2/odds?" in requested_urls[2]
+
+
+def test_the_odds_api_client_uses_eastern_slate_window_for_event_query() -> None:
+    selected_date = date(2026, 3, 24)
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self, *args, **kwargs):
+            return b"[]"
+
+    requested_urls: list[str] = []
+
+    def _fake_urlopen(request, timeout=10):  # noqa: ANN001
+        requested_urls.append(request.full_url)
+        return _Response()
+
+    client = TheOddsApiClient(api_key="test-key")
+    with patch("app.services.odds_provider.urlopen", side_effect=_fake_urlopen):
+        rows = client.fetch_raw_events(selected_date)
+
+    assert rows == []
+    assert len(requested_urls) == 1
+
+    parsed = urlparse(requested_urls[0])
+    query = parse_qs(parsed.query)
+    assert query["commenceTimeFrom"] == ["2026-03-24T04:00:00+00:00"]
+    assert query["commenceTimeTo"] == ["2026-03-25T04:00:00+00:00"]

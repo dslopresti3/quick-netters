@@ -3,12 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
 from app.services.identity import name_aliases, team_alias_tokens
 from app.services.recommendation_service import _match_event_to_game, _match_player_to_projection
 from app.services.odds import STALE_ODDS_THRESHOLD, NormalizedPlayerOdds
-from app.services.odds_provider import LiveOddsProvider, TheOddsApiClient, _parse_american_odds
+from app.services.odds_provider import LiveOddsProvider, TheOddsApiClient, _parse_american_odds, _selected_slate_utc_window
 from app.services.provider_wiring import build_provider_registry_from_env
 
 
@@ -34,8 +34,7 @@ class OddsAuditReport:
 
 
 def _query_params(client: TheOddsApiClient, selected_date: date) -> dict[str, str]:
-    window_start = datetime.combine(selected_date, datetime.min.time(), tzinfo=timezone.utc)
-    window_end = window_start + timedelta(days=1)
+    window_start, window_end = _selected_slate_utc_window(selected_date, client.slate_timezone)
     api_key_value = "<redacted>" if client._api_key else "<missing>"
     return {
         "apiKey": api_key_value,
