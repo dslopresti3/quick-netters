@@ -142,6 +142,22 @@ def test_games_route_excludes_goalies_from_top_projected_scorer() -> None:
     assert payload.games[0].home_top_projected_scorer.player_id == "skater-1"
 
 
+def test_games_route_defaults_display_time_to_america_new_york() -> None:
+    selected_date = date(2026, 3, 24)
+    payload = get_games(date=selected_date, providers=_provider_registry())
+
+    assert payload.games[0].display_timezone == "America/New_York"
+    assert payload.games[0].display_game_time == "2026-03-24 03:00 PM"
+
+
+def test_games_route_uses_requested_display_timezone_when_valid() -> None:
+    selected_date = date(2026, 3, 24)
+    payload = get_games(date=selected_date, timezone="America/Los_Angeles", providers=_provider_registry())
+
+    assert payload.games[0].display_timezone == "America/Los_Angeles"
+    assert payload.games[0].display_game_time == "2026-03-24 12:00 PM"
+
+
 def test_daily_recommendations_route_uses_injected_recommendation_dependencies() -> None:
     selected_date = date.today()
 
@@ -338,7 +354,7 @@ def test_games_route_real_schedule_provider_non_empty_with_upstream_payload() ->
                     {
                         "id": 2026020101,
                         "gameDate": selected_date.isoformat(),
-                        "startTimeUTC": datetime.combine(selected_date, time(1, 0), tzinfo=timezone.utc).isoformat(),
+                        "startTimeUTC": datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc).isoformat(),
                         "gameState": "FUT",
                         "awayTeam": {"commonName": {"default": "Devils"}},
                         "homeTeam": {"commonName": {"default": "Islanders"}},

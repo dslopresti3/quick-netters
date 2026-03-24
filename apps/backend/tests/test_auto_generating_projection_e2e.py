@@ -103,3 +103,82 @@ def test_get_games_returns_generated_projections_for_2026_03_24_and_2026_03_25(t
     assert payload_24_second.projections_available is True
     artifact_after_24_second = json.loads(artifact.read_text(encoding="utf-8"))
     assert artifact_after_24_second == artifact_after_25
+
+
+def test_get_games_regenerates_when_cached_rows_do_not_cover_all_slate_games(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "projections": [
+                    {
+                        "date": "2026-03-24",
+                        "game_id": "2026032401",
+                        "nhl_player_id": "8479323",
+                        "player_name": "Artemi Panarin",
+                        "team_name": "NY Rangers",
+                        "active_team_name": "NY Rangers",
+                        "is_active_roster": True,
+                        "position_code": "LW",
+                        "historical_season_first_goals": 8,
+                        "historical_season_games_played": 82,
+                        "model_probability": 0.22,
+                    },
+                    {
+                        "date": "2026-03-24",
+                        "game_id": "2026032401",
+                        "nhl_player_id": "8477956",
+                        "player_name": "David Pastrnak",
+                        "team_name": "Boston Bruins",
+                        "active_team_name": "Boston Bruins",
+                        "is_active_roster": True,
+                        "position_code": "RW",
+                        "historical_season_first_goals": 9,
+                        "historical_season_games_played": 82,
+                        "model_probability": 0.21,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    schedule_provider = _StaticScheduleProvider(
+        {
+            date(2026, 3, 24): [
+                GameSummary(
+                    game_id="2026032401",
+                    game_time=datetime(2026, 3, 24, 23, 0, tzinfo=timezone.utc),
+                    away_team="NY Rangers",
+                    home_team="Boston Bruins",
+                ),
+                GameSummary(
+                    game_id="2026032402",
+                    game_time=datetime(2026, 3, 25, 1, 30, tzinfo=timezone.utc),
+                    away_team="Colorado Avalanche",
+                    home_team="Dallas Stars",
+                ),
+            ],
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(json.dumps({"players": [
+        {"player_id": "8479323", "player_name": "Artemi Panarin", "active_team_name": "NY Rangers", "is_active_roster": True, "position_code": "LW", "historical_season_first_goals": 8, "historical_season_games_played": 82},
+        {"player_id": "8476459", "player_name": "Mika Zibanejad", "active_team_name": "NY Rangers", "is_active_roster": True, "position_code": "C", "historical_season_first_goals": 7, "historical_season_games_played": 81},
+        {"player_id": "8477956", "player_name": "David Pastrnak", "active_team_name": "Boston Bruins", "is_active_roster": True, "position_code": "RW", "historical_season_first_goals": 9, "historical_season_games_played": 82},
+        {"player_id": "8473419", "player_name": "Brad Marchand", "active_team_name": "Boston Bruins", "is_active_roster": True, "position_code": "LW", "historical_season_first_goals": 6, "historical_season_games_played": 78},
+        {"player_id": "8477492", "player_name": "Nathan MacKinnon", "active_team_name": "Colorado Avalanche", "is_active_roster": True, "position_code": "C", "historical_season_first_goals": 8, "historical_season_games_played": 82},
+        {"player_id": "8478402", "player_name": "Jason Robertson", "active_team_name": "Dallas Stars", "is_active_roster": True, "position_code": "LW", "historical_season_first_goals": 6, "historical_season_games_played": 81}
+    ]}), encoding="utf-8")
+    registry = _build_registry(artifact, schedule_provider, roster_path)
+
+    payload = get_games(date=date(2026, 3, 24), providers=registry)
+
+    assert len(payload.games) == 2
+    late_night_game = next(game for game in payload.games if game.game_id == "2026032402")
+    assert late_night_game.away_top_projected_scorer is not None
+    assert late_night_game.home_top_projected_scorer is not None
+
+    persisted = json.loads(artifact.read_text(encoding="utf-8"))["projections"]
+    persisted_game_ids = {row["game_id"] for row in persisted if row.get("date") == "2026-03-24"}
+    assert persisted_game_ids == {"2026032401", "2026032402"}

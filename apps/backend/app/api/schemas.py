@@ -45,6 +45,8 @@ class GameSummary(APIModel):
     away_team: str
     home_team: str
     status: str | None = Field(default=None, description="Upstream game status, if available")
+    display_game_time: str | None = Field(default=None, description="Display-ready localized game time")
+    display_timezone: str | None = Field(default=None, description="IANA timezone used for display_game_time")
     away_top_projected_scorer: TeamProjectionLeader | None = None
     home_top_projected_scorer: TeamProjectionLeader | None = None
 

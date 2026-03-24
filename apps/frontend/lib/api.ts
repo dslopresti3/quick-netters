@@ -13,6 +13,13 @@ export function getCurrentUtcDate(): string {
   return formatDate(new Date());
 }
 
+export function resolveDisplayTimezone(rawTimezone?: string): string {
+  if (typeof rawTimezone === "string" && rawTimezone.trim().length > 0) {
+    return rawTimezone.trim();
+  }
+  return "America/New_York";
+}
+
 async function fetchJson<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: { Accept: "application/json" },
@@ -41,17 +48,19 @@ export async function fetchDateAvailability(date: string): Promise<DateAvailabil
   return fetchJson<DateAvailabilityResponse>(`/availability/date?date=${encodeURIComponent(date)}`);
 }
 
-export async function fetchGamesByDate(date: string): Promise<GamesResponse> {
-  return fetchJson<GamesResponse>(`/games?date=${encodeURIComponent(date)}`);
+export async function fetchGamesByDate(date: string, timezone?: string): Promise<GamesResponse> {
+  const timezoneParam = resolveDisplayTimezone(timezone);
+  return fetchJson<GamesResponse>(`/games?date=${encodeURIComponent(date)}&timezone=${encodeURIComponent(timezoneParam)}`);
 }
 
 export async function fetchDailyRecommendationsByDate(date: string): Promise<DailyRecommendationsResponse> {
   return fetchJson<DailyRecommendationsResponse>(`/recommendations/daily?date=${encodeURIComponent(date)}`);
 }
 
-export async function fetchGameRecommendations(gameId: string, date: string): Promise<GameRecommendationsResponse | null> {
+export async function fetchGameRecommendations(gameId: string, date: string, timezone?: string): Promise<GameRecommendationsResponse | null> {
   try {
-    return await fetchJson<GameRecommendationsResponse>(`/recommendations/game?game_id=${encodeURIComponent(gameId)}&date=${encodeURIComponent(date)}`);
+    const timezoneParam = resolveDisplayTimezone(timezone);
+    return await fetchJson<GameRecommendationsResponse>(`/recommendations/game?game_id=${encodeURIComponent(gameId)}&date=${encodeURIComponent(date)}&timezone=${encodeURIComponent(timezoneParam)}`);
   } catch (error) {
     if (error instanceof Error && error.message.toLowerCase().includes("not found")) {
       return null;

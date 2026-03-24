@@ -1,15 +1,17 @@
 import Link from "next/link";
 import { DatePickerForm } from "../../components/date-picker-form";
-import { fetchDailyRecommendationsByDate, fetchDateAvailability, fetchGamesByDate, getCurrentUtcDate } from "../../lib/api";
+import { fetchDailyRecommendationsByDate, fetchDateAvailability, fetchGamesByDate, getCurrentUtcDate, resolveDisplayTimezone } from "../../lib/api";
 
 type SlatePageProps = {
   searchParams?: {
     date?: string;
+    timezone?: string;
   };
 };
 
 export default async function SlatePage({ searchParams }: SlatePageProps) {
   const selectedDate = searchParams?.date ?? getCurrentUtcDate();
+  const displayTimezone = resolveDisplayTimezone(searchParams?.timezone);
   const availability = await fetchDateAvailability(selectedDate);
 
   if (!availability.valid_by_product_rule) {
@@ -67,7 +69,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
     );
   }
 
-  const gamesResponse = await fetchGamesByDate(selectedDate);
+  const gamesResponse = await fetchGamesByDate(selectedDate, displayTimezone);
   const shouldLoadRecommendations = availability.projections_available && availability.odds_available;
   const dailyRecommendations = shouldLoadRecommendations ? await fetchDailyRecommendationsByDate(selectedDate) : null;
 
@@ -139,8 +141,8 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
         ) : (
           <div className="game-grid">
             {gamesResponse.games.map((game) => (
-              <Link href={`/games/${game.game_id}?date=${selectedDate}`} key={game.game_id} className="card game-card-link stack-gap-sm">
-                <p className="helper-text">{new Date(game.game_time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" })} UTC</p>
+              <Link href={`/games/${game.game_id}?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}`} key={game.game_id} className="card game-card-link stack-gap-sm">
+                <p className="helper-text">{game.display_game_time ?? new Date(game.game_time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: displayTimezone })} {game.display_timezone ?? displayTimezone}</p>
                 <h3>{game.away_team} @ {game.home_team}</h3>
                 {game.away_top_projected_scorer && game.home_top_projected_scorer ? (
                   <p className="helper-text">
