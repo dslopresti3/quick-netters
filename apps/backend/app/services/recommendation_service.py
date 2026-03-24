@@ -14,6 +14,7 @@ from app.services.interfaces import (
     RecommendationsProvider,
     ScheduleProvider,
 )
+from app.services.dev_projection_provider import _is_goalie
 from app.services.odds import (
     NormalizedPlayerOdds,
     OddsEventMapping,
@@ -219,7 +220,12 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
     def _eligible_projection_candidates(self, selected_date: date, games: list[GameSummary] | None) -> list[PlayerProjectionCandidate]:
         projection_rows = self._projection_rows_for_date(selected_date)
         if games is None:
-            return [projection for projection in projection_rows if projection.roster_eligibility.is_active_roster]
+            return [
+                projection
+                for projection in projection_rows
+                if projection.roster_eligibility.is_active_roster
+                and not _is_goalie(projection.roster_eligibility.position_code)
+            ]
 
         game_team_lookup: dict[str, set[str]] = {}
         for game in games:
@@ -228,6 +234,8 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         eligible_rows: list[PlayerProjectionCandidate] = []
         for projection in projection_rows:
             if not projection.roster_eligibility.is_active_roster:
+                continue
+            if _is_goalie(projection.roster_eligibility.position_code):
                 continue
 
             team_tokens = team_alias_tokens(projection.roster_eligibility.active_team_name)
