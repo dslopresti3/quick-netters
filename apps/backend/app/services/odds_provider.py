@@ -15,7 +15,8 @@ from app.services.odds import NormalizedPlayerOdds, STALE_ODDS_THRESHOLD, normal
 class TheOddsApiClient:
     """Thin HTTP client for The Odds API NHL player first-goal market feed."""
 
-    base_url = "https://api.the-odds-api.com/v4/sports/icehockey_nhl/odds"
+    events_url = "https://api.the-odds-api.com/v4/sports/icehockey_nhl/events"
+    event_odds_url_template = "https://api.the-odds-api.com/v4/sports/icehockey_nhl/events/{event_id}/odds"
     provider_name = "the-odds-api"
     first_goal_market_key = "player_goal_scorer_first"
 
@@ -29,6 +30,33 @@ class TheOddsApiClient:
 
         window_start = datetime.combine(selected_date, datetime.min.time(), tzinfo=timezone.utc)
         window_end = window_start + timedelta(days=1)
+        event_query = urlencode(
+            {
+                "apiKey": self._api_key,
+                "dateFormat": "iso",
+                "commenceTimeFrom": window_start.isoformat(),
+                "commenceTimeTo": window_end.isoformat(),
+            }
+        )
+        event_payload = self._fetch_json(f"{self.events_url}?{event_query}")
+        if not isinstance(event_payload, list):
+            return []
+
+        raw_events: list[dict[str, Any]] = []
+        for event in event_payload:
+            if not isinstance(event, dict):
+                continue
+            event_id = event.get("id")
+            if not isinstance(event_id, str) or not event_id.strip():
+                continue
+            raw_event = self._fetch_event_odds(event_id=event_id.strip())
+            if raw_event is None:
+                continue
+            raw_events.append(raw_event)
+
+        return raw_events
+
+    def _fetch_event_odds(self, event_id: str) -> dict[str, Any] | None:
         params = urlencode(
             {
                 "apiKey": self._api_key,
@@ -36,20 +64,21 @@ class TheOddsApiClient:
                 "markets": self.first_goal_market_key,
                 "oddsFormat": "american",
                 "dateFormat": "iso",
-                "commenceTimeFrom": window_start.isoformat(),
-                "commenceTimeTo": window_end.isoformat(),
             }
         )
-        request = Request(f"{self.base_url}?{params}", headers={"Accept": "application/json"})
+        url = self.event_odds_url_template.format(event_id=event_id)
+        payload = self._fetch_json(f"{url}?{params}")
+        if not isinstance(payload, dict):
+            return None
+        return payload
+
+    def _fetch_json(self, url: str) -> Any | None:
+        request = Request(url, headers={"Accept": "application/json"})
         try:
             with urlopen(request, timeout=self._timeout_seconds) as response:
-                payload = json.load(response)
+                return json.load(response)
         except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
-            return []
-
-        if not isinstance(payload, list):
-            return []
-        return [row for row in payload if isinstance(row, dict)]
+            return None
 
 
 class TheOddsApiAdapter:
