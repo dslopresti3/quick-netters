@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
 
 from app.services.identity import name_aliases, team_alias_tokens
-from app.services.mock_services import _match_event_to_game, _match_player_to_projection
+from app.services.recommendation_service import _match_event_to_game, _match_player_to_projection
 from app.services.odds import STALE_ODDS_THRESHOLD, NormalizedPlayerOdds
 from app.services.odds_provider import LiveOddsProvider, TheOddsApiClient, _parse_american_odds
 from app.services.provider_wiring import build_provider_registry_from_env

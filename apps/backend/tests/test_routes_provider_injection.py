@@ -1,11 +1,11 @@
-import io
-import json
 from datetime import date, datetime, time, timedelta, timezone
 from urllib.error import URLError
 from unittest.mock import patch
 
+import pytest
 from app.api.routes import get_daily_recommendations, get_date_availability, get_game_recommendations, get_games
 from app.api.schemas import GameSummary
+from fastapi import HTTPException
 from app.services.interfaces import (
     OddsProvider,
     PlayerHistoricalProduction,
@@ -14,7 +14,7 @@ from app.services.interfaces import (
     ProjectionProvider,
     ScheduleProvider,
 )
-from app.services.mock_services import ValueRecommendationService
+from app.services.recommendation_service import ValueRecommendationService
 from app.services.odds import NormalizedPlayerOdds
 from app.services.odds_provider import LiveOddsProvider
 from app.services.provider_wiring import ProviderRegistry
@@ -300,20 +300,7 @@ def test_games_route_real_schedule_provider_non_empty_with_upstream_payload() ->
         ]
     }
 
-    class _FakeResponse(io.StringIO):
-        def __init__(self, raw_payload: dict) -> None:
-            super().__init__(json.dumps(raw_payload))
-
-        def getcode(self) -> int:
-            return 200
-
-        def __enter__(self) -> "_FakeResponse":
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:
-            self.close()
-
-    with patch("app.services.real_services.urlopen", side_effect=lambda *args, **kwargs: _FakeResponse(payload)):
+    with patch("app.services.real_services.fetch_json", return_value=payload):
         response = get_games(date=selected_date, providers=providers)
 
     assert len(response.games) == 1
@@ -328,8 +315,9 @@ def test_games_route_includes_note_when_schedule_fetch_fails() -> None:
         odds_provider=EmptyOddsProvider(),
     )
 
-    with patch("app.services.real_services.urlopen", side_effect=URLError("boom")):
-        response = get_games(date=selected_date, providers=providers)
+    with patch("app.services.real_services.fetch_json", side_effect=URLError("boom")):
+        with pytest.raises(HTTPException) as exc_info:
+            get_games(date=selected_date, providers=providers)
 
-    assert response.games == []
-    assert any(f"NHL schedule fetch failed for {selected_date.isoformat()}" in note for note in response.notes)
+    assert exc_info.value.status_code == 503
+    assert f"NHL schedule fetch failed for {selected_date.isoformat()}" in str(exc_info.value.detail)

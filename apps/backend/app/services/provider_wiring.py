@@ -3,13 +3,17 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 
 from app.services.interfaces import OddsProvider, ProjectionProvider, ScheduleProvider
-from app.services.dev_projection_provider import ActiveRosterRepository, AutoGeneratingProjectionProvider
-from app.services.mock_services import MockGamesService, MockOddsService, MockProjectionService, ValueRecommendationService
+from app.services.dev_projection_provider import (
+    AutoGeneratingProjectionProvider,
+    NhlApiActiveRosterRepository,
+    load_player_first_goal_history_from_nhl_api,
+)
+from app.services.mock_services import MockGamesService, MockOddsService, MockProjectionService
 from app.services.odds_provider import LiveOddsProvider
 from app.services.projection_store import build_real_projection_data_source_from_env
+from app.services.recommendation_service import ValueRecommendationService
 from app.services.real_services import NhlScheduleProvider
 
 
@@ -47,12 +51,12 @@ def build_provider_registry_from_env() -> ProviderRegistry:
     else:
         schedule_provider = NhlScheduleProvider()
         projection_source = build_real_projection_data_source_from_env()
-        roster_path = Path(__file__).resolve().parents[1] / "data" / "rosters" / "current_active_rosters.json"
         projection_provider = AutoGeneratingProjectionProvider(
             schedule_provider=schedule_provider,
             artifact_path=projection_source.artifact_path,
-            roster_repository=ActiveRosterRepository(roster_path=roster_path),
-            enable_dev_fallback=os.getenv("AUTO_PROJECTION_DEV_FALLBACK", "0") == "1",
+            roster_repository=NhlApiActiveRosterRepository(),
+            enable_dev_fallback=False,
+            history_loader=load_player_first_goal_history_from_nhl_api,
         )
         odds_provider = LiveOddsProvider()
 

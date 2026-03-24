@@ -9,7 +9,7 @@ from app.services.interfaces import (
     ProjectionProvider,
     ScheduleProvider,
 )
-from app.services.mock_services import ValueRecommendationService
+from app.services.recommendation_service import ValueRecommendationService
 from app.services.odds import NormalizedPlayerOdds
 
 
@@ -34,6 +34,26 @@ class StaticOddsProvider(OddsProvider):
         self._rows = rows
 
     def fetch_player_first_goal_odds(self, selected_date: date) -> list[NormalizedPlayerOdds]:
+        return list(self._rows)
+
+
+class RecordingProjectionProvider(ProjectionProvider):
+    def __init__(self, rows: list[PlayerProjectionCandidate], calls: list[str]) -> None:
+        self._rows = rows
+        self._calls = calls
+
+    def fetch_player_first_goal_projections(self, selected_date: date) -> list[PlayerProjectionCandidate]:
+        self._calls.append("projections")
+        return list(self._rows)
+
+
+class RecordingOddsProvider(OddsProvider):
+    def __init__(self, rows: list[NormalizedPlayerOdds], calls: list[str]) -> None:
+        self._rows = rows
+        self._calls = calls
+
+    def fetch_player_first_goal_odds(self, selected_date: date) -> list[NormalizedPlayerOdds]:
+        self._calls.append("odds")
         return list(self._rows)
 
 
@@ -208,3 +228,39 @@ def test_odds_mapping_does_not_require_provider_ids_to_equal_nhl_ids() -> None:
     assert len(recs) == 1
     assert recs[0].game_id == "2026020001"
     assert recs[0].player_id == "847123"
+
+
+def test_recommendations_fetch_projections_before_odds_and_require_projections_first() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026020001", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
+    calls: list[str] = []
+    projections = [_projection("2026020001", "847123", "Artemi Panarin", "NY Rangers", "NY Rangers")]
+    odds_rows = [_raw_odds("Artemi Panarin", "NY Rangers", "Boston Bruins", game_time, team="NY Rangers")]
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=RecordingProjectionProvider(projections, calls=calls),
+        odds_provider=RecordingOddsProvider(odds_rows, calls=calls),
+    )
+
+    recs = service.fetch_daily(selected_date)
+
+    assert recs
+    assert calls == ["projections", "odds"]
+
+
+def test_recommendations_do_not_pull_odds_when_no_projections_exist() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026020001", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
+    calls: list[str] = []
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=RecordingProjectionProvider([], calls=calls),
+        odds_provider=RecordingOddsProvider([_raw_odds("Artemi Panarin", "NY Rangers", "Boston Bruins", game_time)], calls=calls),
+    )
+
+    recs = service.fetch_daily(selected_date)
+
+    assert recs == []
+    assert calls == ["projections"]
