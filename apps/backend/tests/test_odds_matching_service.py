@@ -57,13 +57,21 @@ class RecordingOddsProvider(OddsProvider):
         return list(self._rows)
 
 
-def _projection(game_id: str, player_id: str, name: str, projected_team: str, active_team: str, active: bool = True) -> PlayerProjectionCandidate:
+def _projection(
+    game_id: str,
+    player_id: str,
+    name: str,
+    projected_team: str,
+    active_team: str,
+    active: bool = True,
+    model_probability: float = 0.22,
+) -> PlayerProjectionCandidate:
     return PlayerProjectionCandidate(
         game_id=game_id,
         nhl_player_id=player_id,
         player_name=name,
         projected_team_name=projected_team,
-        model_probability=0.22,
+        model_probability=model_probability,
         historical_production=PlayerHistoricalProduction(season_first_goals=2, season_games_played=50),
         roster_eligibility=PlayerRosterEligibility(active_team_name=active_team, is_active_roster=active),
     )
@@ -176,6 +184,47 @@ def test_player_mapping_uses_team_context_to_disambiguate_shared_name_aliases() 
     recs = service.fetch_daily(selected_date)
     assert len(recs) == 1
     assert recs[0].player_id == "car-sebastian-aho"
+
+
+def test_player_mapping_ignores_non_team_bookmaker_description_context() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026021004", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
+    projections = [_projection("2026021004", "847123", "Artemi Panarin", "NY Rangers", "NY Rangers")]
+    # Live books sometimes use non-team metadata in description for first-goal markets.
+    odds_rows = [_raw_odds("Artemi Panarin", "NY Rangers", "Boston Bruins", game_time, team="Any Other Player")]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    recs = service.fetch_daily(selected_date)
+    assert len(recs) == 1
+    assert recs[0].player_id == "847123"
+
+
+def test_player_mapping_uses_full_projection_candidate_pool_per_matched_game() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026021005", game_time=game_time, away_team="Dallas Stars", home_team="Colorado Avalanche")
+    projections = [
+        _projection("2026021005", "top-player", "Top Shooter", "Dallas Stars", "Dallas Stars", model_probability=0.31),
+        _projection("2026021005", "depth-player", "Depth Finisher", "Dallas Stars", "Dallas Stars", model_probability=0.24),
+        _projection("2026021005", "opp-player", "Opponent Sniper", "Colorado Avalanche", "Colorado Avalanche", model_probability=0.26),
+    ]
+    odds_rows = [_raw_odds("Depth Finisher", "Dallas Stars", "Colorado Avalanche", game_time, team="Dallas")]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    recs = service.fetch_daily(selected_date)
+    assert len(recs) == 1
+    assert recs[0].player_id == "depth-player"
 
 
 def test_active_roster_only_eligibility_and_traded_player_behavior() -> None:
