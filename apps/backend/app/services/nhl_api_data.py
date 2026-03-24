@@ -63,6 +63,7 @@ class NhlRosterPlayer:
     player_id: str
     player_name: str
     active_team_name: str
+    position_code: str | None = None
 
 
 def team_abbrev_for_name(team_name: str) -> str | None:
@@ -92,6 +93,7 @@ def fetch_team_roster_current(team_abbrev: str) -> list[NhlRosterPlayer]:
             player_id=player["player_id"],
             player_name=player["player_name"],
             active_team_name=player["active_team_name"],
+            position_code=player.get("position_code"),
         )
         for player in players
     ]
@@ -107,14 +109,23 @@ def fetch_player_first_goal_history(player_id: str, selected_date: date) -> Play
 
     season_games_played = float(len(game_log_rows)) if game_log_rows else None
     first_goals = 0.0
+    total_goals = 0.0
+    total_shots = 0.0
+    first_period_goals = 0.0
     for row in game_log_rows:
         first_goals += _first_goal_value(row)
+        total_goals += _numeric_value(row.get("goals"))
+        total_shots += _numeric_value(row.get("shots"))
+        first_period_goals += _numeric_value(row.get("firstPeriodGoals"))
 
     if season_games_played is None:
         return PlayerHistoricalProduction()
     return PlayerHistoricalProduction(
         season_first_goals=first_goals,
         season_games_played=season_games_played,
+        season_total_goals=total_goals,
+        season_total_shots=total_shots,
+        season_first_period_goals=first_period_goals,
     )
 
 
@@ -141,6 +152,7 @@ def _extract_roster_players(payload: dict[str, Any]) -> list[dict[str, str]]:
                     "player_id": player_id,
                     "player_name": full_name or player_id,
                     "active_team_name": team_name,
+                    "position_code": _position_code(player),
                 }
             )
     return players
@@ -180,3 +192,19 @@ def _name_default(raw_name: Any) -> str:
     if isinstance(raw_name, str):
         return raw_name.strip()
     return ""
+
+
+def _position_code(player: dict[str, Any]) -> str | None:
+    for key in ("positionCode", "position", "positionAbbrev"):
+        value = player.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().upper()
+    return None
+
+
+def _numeric_value(value: Any) -> float:
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    return 0.0

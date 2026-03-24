@@ -16,6 +16,7 @@ def test_fetch_team_roster_current_uses_nhl_roster_endpoint() -> None:
                     "firstName": {"default": "Mitch"},
                     "lastName": {"default": "Marner"},
                     "currentTeamAbbrev": "TOR",
+                    "positionCode": "RW",
                 }
             ]
         }
@@ -25,6 +26,7 @@ def test_fetch_team_roster_current_uses_nhl_roster_endpoint() -> None:
 
     assert seen["url"] == "https://api-web.nhle.com/v1/roster/TOR/current"
     assert rows[0].player_id == "8478402"
+    assert rows[0].position_code == "RW"
 
 
 def test_fetch_player_first_goal_history_uses_nhl_player_game_log_endpoint() -> None:
@@ -35,8 +37,8 @@ def test_fetch_player_first_goal_history_uses_nhl_player_game_log_endpoint() -> 
         return {
             "gameLog": [
                 {"firstGoals": 1},
-                {"firstGoal": True},
-                {"isFirstGoal": True},
+                {"firstGoal": True, "goals": 2, "shots": 6, "firstPeriodGoals": 1},
+                {"isFirstGoal": True, "goals": 1, "shots": 3},
                 {},
             ]
         }
@@ -47,10 +49,12 @@ def test_fetch_player_first_goal_history_uses_nhl_player_game_log_endpoint() -> 
     assert seen["url"] == "https://api-web.nhle.com/v1/player/8478402/game-log/20252026/2"
     assert history.season_first_goals == 3.0
     assert history.season_games_played == 4.0
+    assert history.season_total_goals == 3.0
+    assert history.season_total_shots == 9.0
+    assert history.season_first_period_goals == 1.0
 
 
 def test_team_abbrev_for_name_resolves_schedule_common_names() -> None:
     assert team_abbrev_for_name("Rangers") == "NYR"
     assert team_abbrev_for_name("Bruins") == "BOS"
     assert team_abbrev_for_name("Canadiens") == "MTL"
-

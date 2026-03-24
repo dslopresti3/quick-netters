@@ -10,12 +10,16 @@ from app.services.odds import NormalizedPlayerOdds
 class PlayerHistoricalProduction:
     season_first_goals: float | None = None
     season_games_played: float | None = None
+    season_total_goals: float | None = None
+    season_total_shots: float | None = None
+    season_first_period_goals: float | None = None
 
 
 @dataclass(frozen=True)
 class PlayerRosterEligibility:
     active_team_name: str
     is_active_roster: bool = True
+    position_code: str | None = None
 
 
 @dataclass(frozen=True)
