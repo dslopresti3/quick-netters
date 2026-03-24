@@ -1,8 +1,14 @@
+from pathlib import Path
+
 from fastapi import FastAPI
+from dotenv import load_dotenv
 
 from app.api.routes import router
 from app.api.schemas import HealthResponse
 from app.services.provider_wiring import ProviderRegistry, build_provider_registry_from_env
+
+BACKEND_ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+load_dotenv(dotenv_path=BACKEND_ENV_PATH)
 
 
 def create_app(provider_registry: ProviderRegistry | None = None) -> FastAPI:
