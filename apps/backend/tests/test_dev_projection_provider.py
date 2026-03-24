@@ -558,6 +558,151 @@ def test_equal_history_players_use_ascending_name_tiebreaker_not_descending(tmp_
     assert sabres_rows[0].player_name == "Tage Thompson"
 
 
+def test_candidate_filtering_excludes_goalies_and_non_current_team_players(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(artifact, [])
+    selected_date = date(2026, 3, 24)
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026032401",
+                    game_time=datetime(2026, 3, 24, 23, 0, tzinfo=timezone.utc),
+                    away_team="NY Rangers",
+                    home_team="Boston Bruins",
+                )
+            ]
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(
+        json.dumps(
+            {
+                "players": [
+                    {"player_id": "8479323", "player_name": "Artemi Panarin", "active_team_name": "NY Rangers", "is_active_roster": True, "position_code": "LW"},
+                    {"player_id": "goalie-1", "player_name": "Igor Shesterkin", "active_team_name": "NY Rangers", "is_active_roster": True, "position_code": "G"},
+                    {"player_id": "trade-1", "player_name": "Old Ranger", "active_team_name": "Chicago Blackhawks", "is_active_roster": True, "position_code": "C"},
+                    {"player_id": "8477956", "player_name": "David Pastrnak", "active_team_name": "Boston Bruins", "is_active_roster": True, "position_code": "RW"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=ActiveRosterRepository(roster_path=roster_path),
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+
+    assert {row.player_name for row in rows} == {"Artemi Panarin", "David Pastrnak"}
+    assert all((row.roster_eligibility.position_code or "") != "G" for row in rows)
+
+
+def test_first_goal_scoring_is_not_flat_and_uses_first_goal_history_weight(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(artifact, [])
+    selected_date = date(2026, 3, 24)
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026032402",
+                    game_time=datetime(2026, 3, 24, 23, 0, tzinfo=timezone.utc),
+                    away_team="Toronto Maple Leafs",
+                    home_team="Boston Bruins",
+                )
+            ]
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(
+        json.dumps(
+            {
+                "players": [
+                    {"player_id": "p1", "player_name": "Alpha", "active_team_name": "Toronto Maple Leafs", "is_active_roster": True, "position_code": "C"},
+                    {"player_id": "p2", "player_name": "Beta", "active_team_name": "Toronto Maple Leafs", "is_active_roster": True, "position_code": "LW"},
+                    {"player_id": "p3", "player_name": "Gamma", "active_team_name": "Boston Bruins", "is_active_roster": True, "position_code": "RW"},
+                    {"player_id": "p4", "player_name": "Delta", "active_team_name": "Boston Bruins", "is_active_roster": True, "position_code": "C"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    history = {
+        "p1": PlayerHistoricalProduction(season_first_goals=8, season_total_goals=20, season_total_shots=180, season_games_played=60),
+        "p2": PlayerHistoricalProduction(season_first_goals=0, season_total_goals=20, season_total_shots=180, season_games_played=60),
+        "p3": PlayerHistoricalProduction(season_first_goals=6, season_total_goals=18, season_total_shots=150, season_games_played=60),
+        "p4": PlayerHistoricalProduction(season_first_goals=1, season_total_goals=18, season_total_shots=150, season_games_played=60),
+    }
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=ActiveRosterRepository(roster_path=roster_path),
+        history_loader=lambda _date, _ids, _path: history,
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+
+    probs = [row.model_probability for row in rows]
+    assert len(set(probs)) > 2
+    alpha = next(row for row in rows if row.nhl_player_id == "p1")
+    beta = next(row for row in rows if row.nhl_player_id == "p2")
+    assert alpha.model_probability > beta.model_probability
+
+
+def test_top_projected_players_are_plausible_forwards(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(artifact, [])
+    selected_date = date(2026, 3, 24)
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026032403",
+                    game_time=datetime(2026, 3, 24, 23, 0, tzinfo=timezone.utc),
+                    away_team="Edmonton Oilers",
+                    home_team="Toronto Maple Leafs",
+                )
+            ]
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(
+        json.dumps(
+            {
+                "players": [
+                    {"player_id": "mcd", "player_name": "Connor McDavid", "active_team_name": "Edmonton Oilers", "is_active_roster": True, "position_code": "C"},
+                    {"player_id": "bouch", "player_name": "Evan Bouchard", "active_team_name": "Edmonton Oilers", "is_active_roster": True, "position_code": "D"},
+                    {"player_id": "mat", "player_name": "Auston Matthews", "active_team_name": "Toronto Maple Leafs", "is_active_roster": True, "position_code": "C"},
+                    {"player_id": "rielly", "player_name": "Morgan Rielly", "active_team_name": "Toronto Maple Leafs", "is_active_roster": True, "position_code": "D"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    history = {
+        "mcd": PlayerHistoricalProduction(season_first_goals=7, season_total_goals=45, season_total_shots=260, season_games_played=70),
+        "bouch": PlayerHistoricalProduction(season_first_goals=0, season_total_goals=14, season_total_shots=150, season_games_played=70),
+        "mat": PlayerHistoricalProduction(season_first_goals=9, season_total_goals=50, season_total_shots=280, season_games_played=70),
+        "rielly": PlayerHistoricalProduction(season_first_goals=0, season_total_goals=8, season_total_shots=120, season_games_played=70),
+    }
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=ActiveRosterRepository(roster_path=roster_path),
+        history_loader=lambda _date, _ids, _path: history,
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+
+    oilers_rows = [row for row in rows if row.projected_team_name == "Edmonton Oilers"]
+    leafs_rows = [row for row in rows if row.projected_team_name == "Toronto Maple Leafs"]
+    assert oilers_rows[0].player_name == "Connor McDavid"
+    assert leafs_rows[0].player_name == "Auston Matthews"
+
+
 def test_history_loader_fetches_live_history_by_default_when_missing(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("NHL_HISTORY_MAX_LIVE_REQUESTS_PER_GAMES", raising=False)
     monkeypatch.delenv("NHL_HISTORY_MAX_LIVE_REQUESTS_PER_GAME", raising=False)

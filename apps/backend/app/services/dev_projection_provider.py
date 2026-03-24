@@ -35,8 +35,12 @@ class ActiveRosterPlayer:
     player_name: str
     active_team_name: str
     is_active_roster: bool
+    position_code: str | None = None
     historical_season_first_goals: float | None = None
     historical_season_games_played: float | None = None
+    historical_season_total_goals: float | None = None
+    historical_season_total_shots: float | None = None
+    historical_season_first_period_goals: float | None = None
 
 
 class ActiveRosterRepository:
@@ -81,8 +85,12 @@ class ActiveRosterRepository:
                 player_name=player_name,
                 active_team_name=active_team_name,
                 is_active_roster=is_active_roster,
+                position_code=_normalize_position_code(raw.get("position_code")),
                 historical_season_first_goals=_as_float(raw.get("historical_season_first_goals")),
                 historical_season_games_played=_as_float(raw.get("historical_season_games_played")),
+                historical_season_total_goals=_as_float(raw.get("historical_season_total_goals")),
+                historical_season_total_shots=_as_float(raw.get("historical_season_total_shots")),
+                historical_season_first_period_goals=_as_float(raw.get("historical_season_first_period_goals")),
             )
             loaded.setdefault(active_team_name.lower(), []).append(player)
 
@@ -116,6 +124,7 @@ class NhlApiActiveRosterRepository:
                     player_name=player.player_name,
                     active_team_name=team_name,
                     is_active_roster=True,
+                    position_code=_normalize_position_code(getattr(player, "position_code", None)),
                 )
             )
         self._cache_by_team_name[team_key] = [player for player in rows]
@@ -124,11 +133,24 @@ class NhlApiActiveRosterRepository:
 
 @dataclass(frozen=True)
 class _ProjectionTemplate:
-    base_probability: float
-    decrement_per_rank: float
+    first_goal_weight: float
+    total_goals_weight: float
+    shot_volume_weight: float
+    first_period_goal_weight: float
+    team_offense_weight: float
+    team_defense_weight: float
 
 
-_DEFAULT_TEMPLATE = _ProjectionTemplate(base_probability=0.17, decrement_per_rank=0.025)
+_DEFAULT_TEMPLATE = _ProjectionTemplate(
+    first_goal_weight=0.65,
+    total_goals_weight=0.2,
+    shot_volume_weight=0.1,
+    first_period_goal_weight=0.05,
+    team_offense_weight=0.65,
+    team_defense_weight=0.35,
+)
+_GOALIE_POSITION_CODES = {"G", "GOALIE", "GK"}
+_FORWARD_POSITION_CODES = {"C", "LW", "RW", "F"}
 
 
 class AutoGeneratingProjectionProvider(ProjectionProvider):
@@ -277,14 +299,7 @@ def _build_eligible_player_pool(
                     "active_roster_count": len(players),
                 },
             )
-            ranked = sorted(
-                players,
-                key=lambda p: (
-                    -(p.historical_season_first_goals or 0.0),
-                    -((p.historical_season_first_goals or 0.0) / max((p.historical_season_games_played or 82.0), 1.0)),
-                    p.player_name.lower(),
-                ),
-            )
+            ranked = sorted(_filter_and_prioritize_roster(players=players, projected_team_name=team_name), key=lambda p: p.player_name.lower())
             for player in ranked:
                 pool.append(
                     _EligiblePlayerCandidate(
@@ -296,40 +311,96 @@ def _build_eligible_player_pool(
     return pool
 
 
+def _filter_and_prioritize_roster(players: list[ActiveRosterPlayer], projected_team_name: str) -> list[ActiveRosterPlayer]:
+    eligible = [
+        player
+        for player in players
+        if player.is_active_roster
+        and player.active_team_name.strip().lower() == projected_team_name.strip().lower()
+        and not _is_goalie(player.position_code)
+    ]
+    forwards = [player for player in eligible if _is_forward(player.position_code)]
+    return forwards if forwards else eligible
+
+
+def _is_goalie(position_code: str | None) -> bool:
+    normalized = _normalize_position_code(position_code)
+    return normalized in _GOALIE_POSITION_CODES
+
+
+def _is_forward(position_code: str | None) -> bool:
+    normalized = _normalize_position_code(position_code)
+    return normalized in _FORWARD_POSITION_CODES
+
+
 def _generate_candidates_from_eligible_player_pool(
     eligible_player_pool: list[_EligiblePlayerCandidate],
     player_history: dict[str, PlayerHistoricalProduction],
     template: _ProjectionTemplate = _DEFAULT_TEMPLATE,
 ) -> list[PlayerProjectionCandidate]:
     rows: list[PlayerProjectionCandidate] = []
-    rank_by_game_team: dict[tuple[str, str], int] = {}
+    team_candidates: dict[tuple[str, str], list[_EligiblePlayerCandidate]] = {}
+    game_team_names: dict[str, set[str]] = {}
     for candidate in eligible_player_pool:
         rank_key = (candidate.game_id, candidate.projected_team_name)
-        rank = rank_by_game_team.get(rank_key, 0)
-        rank_by_game_team[rank_key] = rank + 1
-        probability = max(template.base_probability - (rank * template.decrement_per_rank), 0.01)
-        player_historical = player_history.get(
-            candidate.player.player_id,
-            PlayerHistoricalProduction(
-                season_first_goals=candidate.player.historical_season_first_goals,
-                season_games_played=candidate.player.historical_season_games_played,
-            ),
-        )
-        rows.append(
-            PlayerProjectionCandidate(
-                game_id=candidate.game_id,
-                nhl_player_id=candidate.player.player_id,
-                player_name=candidate.player.player_name,
-                projected_team_name=candidate.projected_team_name,
-                model_probability=round(probability, 4),
-                historical_production=player_historical,
-                roster_eligibility=PlayerRosterEligibility(
-                    active_team_name=candidate.player.active_team_name,
-                    is_active_roster=candidate.player.is_active_roster,
+        team_candidates.setdefault(rank_key, []).append(candidate)
+        game_team_names.setdefault(candidate.game_id, set()).add(candidate.projected_team_name)
+
+    team_strength_by_game_team: dict[tuple[str, str], float] = {}
+    for game_id, team_names in game_team_names.items():
+        for team_name in team_names:
+            own_key = (game_id, team_name)
+            opponent_team_name = next((name for name in team_names if name != team_name), None)
+            opponent_candidates = team_candidates.get((game_id, opponent_team_name), []) if opponent_team_name else []
+            offense_strength = _team_offense_strength(team_candidates.get(own_key, []), player_history)
+            defense_vulnerability = _team_defense_vulnerability(opponent_candidates, player_history)
+            team_strength_by_game_team[own_key] = (
+                template.team_offense_weight * offense_strength
+                + template.team_defense_weight * defense_vulnerability
+            )
+
+    team_probability_by_game_team: dict[tuple[str, str], float] = {}
+    for game_id, team_names in game_team_names.items():
+        keys = [(game_id, team_name) for team_name in team_names]
+        total_strength = sum(max(team_strength_by_game_team.get(key, 0.0), 0.01) for key in keys)
+        for key in keys:
+            team_probability_by_game_team[key] = max(team_strength_by_game_team.get(key, 0.01), 0.01) / max(total_strength, 0.01)
+
+    for rank_key, candidates in team_candidates.items():
+        scored_players: list[tuple[_EligiblePlayerCandidate, PlayerHistoricalProduction, float]] = []
+        for candidate in candidates:
+            player_historical = player_history.get(
+                candidate.player.player_id,
+                PlayerHistoricalProduction(
+                    season_first_goals=candidate.player.historical_season_first_goals,
+                    season_games_played=candidate.player.historical_season_games_played,
+                    season_total_goals=candidate.player.historical_season_total_goals,
+                    season_total_shots=candidate.player.historical_season_total_shots,
+                    season_first_period_goals=candidate.player.historical_season_first_period_goals,
                 ),
             )
-        )
+            scored_players.append((candidate, player_historical, _player_first_goal_score(player_historical, template)))
 
+        total_player_score = sum(score for _, _, score in scored_players)
+        team_probability = team_probability_by_game_team.get(rank_key, 0.5)
+        for candidate, player_historical, player_score in sorted(scored_players, key=lambda row: (-row[2], row[0].player.player_name.lower())):
+            player_share_within_team = player_score / max(total_player_score, 1e-9)
+            probability = team_probability * player_share_within_team
+            rows.append(
+                PlayerProjectionCandidate(
+                    game_id=candidate.game_id,
+                    nhl_player_id=candidate.player.player_id,
+                    player_name=candidate.player.player_name,
+                    projected_team_name=candidate.projected_team_name,
+                    model_probability=round(probability, 4),
+                    historical_production=player_historical,
+                    roster_eligibility=PlayerRosterEligibility(
+                        active_team_name=candidate.player.active_team_name,
+                        is_active_roster=candidate.player.is_active_roster,
+                        position_code=candidate.player.position_code,
+                    ),
+                )
+            )
     return rows
 
 
@@ -349,8 +420,10 @@ def _generate_placeholder_candidates(scheduled_games: list[GameSummary]) -> list
                         historical_production=PlayerHistoricalProduction(
                             season_first_goals=float(2 + index),
                             season_games_played=float(60 + index),
+                            season_total_goals=float(12 + (2 * index)),
+                            season_total_shots=float(100 + (20 * index)),
                         ),
-                        roster_eligibility=PlayerRosterEligibility(active_team_name=team_name, is_active_roster=True),
+                        roster_eligibility=PlayerRosterEligibility(active_team_name=team_name, is_active_roster=True, position_code="F"),
                     )
                 )
     return rows
@@ -391,8 +464,12 @@ def _as_serializable_rows(selected_date: date, rows: list[PlayerProjectionCandid
                 "team_name": row.projected_team_name,
                 "active_team_name": row.roster_eligibility.active_team_name,
                 "is_active_roster": row.roster_eligibility.is_active_roster,
+                "position_code": row.roster_eligibility.position_code,
                 "historical_season_first_goals": row.historical_production.season_first_goals,
                 "historical_season_games_played": row.historical_production.season_games_played,
+                "historical_season_total_goals": row.historical_production.season_total_goals,
+                "historical_season_total_shots": row.historical_production.season_total_shots,
+                "historical_season_first_period_goals": row.historical_production.season_first_period_goals,
                 "probability": row.model_probability,
                 "model_probability": row.model_probability,
             }
@@ -430,19 +507,28 @@ def _load_player_first_goal_history_from_artifact(
             continue
         first_goals = _as_float(row.get("historical_season_first_goals"))
         games_played = _as_float(row.get("historical_season_games_played"))
-        if first_goals is None and games_played is None:
+        total_goals = _as_float(row.get("historical_season_total_goals"))
+        total_shots = _as_float(row.get("historical_season_total_shots"))
+        first_period_goals = _as_float(row.get("historical_season_first_period_goals"))
+        if first_goals is None and games_played is None and total_goals is None and total_shots is None:
             continue
         current = history.get(player_id)
         if current is None:
             history[player_id] = PlayerHistoricalProduction(
                 season_first_goals=first_goals,
                 season_games_played=games_played,
+                season_total_goals=total_goals,
+                season_total_shots=total_shots,
+                season_first_period_goals=first_period_goals,
             )
             continue
 
         history[player_id] = PlayerHistoricalProduction(
             season_first_goals=max(_history_value(current.season_first_goals), _history_value(first_goals)),
             season_games_played=max(_history_value(current.season_games_played), _history_value(games_played)),
+            season_total_goals=max(_history_value(current.season_total_goals), _history_value(total_goals)),
+            season_total_shots=max(_history_value(current.season_total_shots), _history_value(total_shots)),
+            season_first_period_goals=max(_history_value(current.season_first_period_goals), _history_value(first_period_goals)),
         )
     return history
 
@@ -537,6 +623,56 @@ def _history_value(value: float | None) -> float:
     return value
 
 
+def _player_first_goal_score(player_historical: PlayerHistoricalProduction, template: _ProjectionTemplate) -> float:
+    first_goals = _history_value(player_historical.season_first_goals)
+    total_goals = _history_value(player_historical.season_total_goals)
+    total_shots = _history_value(player_historical.season_total_shots)
+    first_period_goals = _history_value(player_historical.season_first_period_goals)
+    games_played = max(_history_value(player_historical.season_games_played), 1.0)
+    shots_per_game = total_shots / games_played
+    return max(
+        (
+            template.first_goal_weight * first_goals
+            + template.total_goals_weight * total_goals
+            + template.shot_volume_weight * shots_per_game
+            + template.first_period_goal_weight * first_period_goals
+        ),
+        0.0001,
+    )
+
+
+def _team_offense_strength(
+    candidates: list[_EligiblePlayerCandidate],
+    player_history: dict[str, PlayerHistoricalProduction],
+) -> float:
+    if not candidates:
+        return 0.01
+    total_goals = 0.0
+    for candidate in candidates:
+        historical = player_history.get(
+            candidate.player.player_id,
+            PlayerHistoricalProduction(season_total_goals=candidate.player.historical_season_total_goals),
+        )
+        total_goals += _history_value(historical.season_total_goals)
+    return max(total_goals / max(len(candidates), 1), 0.01)
+
+
+def _team_defense_vulnerability(
+    candidates: list[_EligiblePlayerCandidate],
+    player_history: dict[str, PlayerHistoricalProduction],
+) -> float:
+    if not candidates:
+        return 0.01
+    total_first_goals = 0.0
+    for candidate in candidates:
+        historical = player_history.get(
+            candidate.player.player_id,
+            PlayerHistoricalProduction(season_first_goals=candidate.player.historical_season_first_goals),
+        )
+        total_first_goals += _history_value(historical.season_first_goals)
+    return 1.0 / max((total_first_goals / max(len(candidates), 1)) + 1.0, 0.01)
+
+
 def _season_key(selected_date: date) -> str:
     start_year = selected_date.year if selected_date.month >= 9 else selected_date.year - 1
     return f"{start_year}{start_year + 1}"
@@ -586,10 +722,14 @@ def _load_projection_rows_for_date_from_artifact(path: Path, selected_date: date
                 historical_production=PlayerHistoricalProduction(
                     season_first_goals=_as_float(row.get("historical_season_first_goals")),
                     season_games_played=_as_float(row.get("historical_season_games_played")),
+                    season_total_goals=_as_float(row.get("historical_season_total_goals")),
+                    season_total_shots=_as_float(row.get("historical_season_total_shots")),
+                    season_first_period_goals=_as_float(row.get("historical_season_first_period_goals")),
                 ),
                 roster_eligibility=PlayerRosterEligibility(
                     active_team_name=active_team_name_raw.strip(),
                     is_active_roster=bool(row.get("is_active_roster", True)),
+                    position_code=_normalize_position_code(row.get("position_code")),
                 ),
             )
         )
@@ -608,6 +748,12 @@ def _slug(value: str) -> str:
 def _as_float(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
+    return None
+
+
+def _normalize_position_code(value: Any) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip().upper()
     return None
 
 
