@@ -208,4 +208,4 @@ def test_the_odds_api_client_applies_eastern_slate_window_after_events_fetch() -
 
     parsed = urlparse(requested_urls[0])
     query = parse_qs(parsed.query)
-    assert query == {"apiKey": ["test-key"], "dateFormat": ["iso"]}
+    assert query == {"apiKey": ["test-key"]}
