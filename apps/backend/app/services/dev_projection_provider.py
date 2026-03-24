@@ -90,50 +90,37 @@ _DEFAULT_TEMPLATE = _ProjectionTemplate(base_probability=0.17, decrement_per_ran
 
 
 class AutoGeneratingProjectionProvider(ProjectionProvider):
-    """Use stored projections when available; otherwise generate real-player rows from active rosters.
-
-    Placeholder development generator can be enabled explicitly via `enable_dev_fallback`.
-    """
+    """Strict real-mode projection pipeline sourced from schedule -> rosters -> player history."""
 
     def __init__(
         self,
-        base_provider: ProjectionProvider,
         schedule_provider: ScheduleProvider,
         artifact_path: Path,
         roster_repository: ActiveRosterRepository,
         *,
         enable_dev_fallback: bool = False,
     ) -> None:
-        self._base_provider = base_provider
         self._schedule_provider = schedule_provider
         self._artifact_path = artifact_path
         self._roster_repository = roster_repository
         self._enable_dev_fallback = enable_dev_fallback
 
     def fetch_player_first_goal_projections(self, selected_date: date) -> list[PlayerProjectionCandidate]:
-        existing = self._base_provider.fetch_player_first_goal_projections(selected_date)
-        if existing and not _contains_dev_placeholder_rows(existing):
-            return existing
-
         scheduled_games = self._schedule_provider.fetch(selected_date)
         if not scheduled_games:
-            return existing if existing else []
+            return []
+
+        player_history = _load_player_first_goal_history(self._artifact_path)
 
         generated = _generate_candidates_from_active_rosters(
             scheduled_games=scheduled_games,
             roster_repository=self._roster_repository,
+            player_history=player_history,
         )
 
         if generated:
             _upsert_generated_rows(artifact_path=self._artifact_path, selected_date=selected_date, rows=generated)
             return generated
-
-        if existing:
-            logger.warning(
-                "Retaining existing projections because active-roster generation yielded no rows",
-                extra={"selected_date": selected_date.isoformat(), "artifact_path": str(self._artifact_path)},
-            )
-            return existing
 
         if self._enable_dev_fallback:
             generated = _generate_placeholder_candidates(scheduled_games=scheduled_games)
@@ -143,18 +130,29 @@ class AutoGeneratingProjectionProvider(ProjectionProvider):
         return []
 
 
-def _contains_dev_placeholder_rows(rows: list[PlayerProjectionCandidate]) -> bool:
-    return any(row.nhl_player_id.startswith("dev-") or " skater " in row.player_name.lower() for row in rows)
-
-
 def _generate_candidates_from_active_rosters(
     scheduled_games: list[GameSummary],
     roster_repository: ActiveRosterRepository,
+    player_history: dict[str, PlayerHistoricalProduction],
 ) -> list[PlayerProjectionCandidate]:
     rows: list[PlayerProjectionCandidate] = []
     for game in scheduled_games:
-        rows.extend(_project_team_candidates(game_id=game.game_id, team_name=game.away_team, roster_repository=roster_repository))
-        rows.extend(_project_team_candidates(game_id=game.game_id, team_name=game.home_team, roster_repository=roster_repository))
+        rows.extend(
+            _project_team_candidates(
+                game_id=game.game_id,
+                team_name=game.away_team,
+                roster_repository=roster_repository,
+                player_history=player_history,
+            )
+        )
+        rows.extend(
+            _project_team_candidates(
+                game_id=game.game_id,
+                team_name=game.home_team,
+                roster_repository=roster_repository,
+                player_history=player_history,
+            )
+        )
     return rows
 
 
@@ -162,6 +160,7 @@ def _project_team_candidates(
     game_id: str,
     team_name: str,
     roster_repository: ActiveRosterRepository,
+    player_history: dict[str, PlayerHistoricalProduction],
     template: _ProjectionTemplate = _DEFAULT_TEMPLATE,
 ) -> list[PlayerProjectionCandidate]:
     players = roster_repository.active_players_for_team(team_name)
@@ -178,6 +177,13 @@ def _project_team_candidates(
     rows: list[PlayerProjectionCandidate] = []
     for idx, player in enumerate(ranked):
         probability = max(template.base_probability - (idx * template.decrement_per_rank), 0.01)
+        player_historical = player_history.get(
+            player.player_id,
+            PlayerHistoricalProduction(
+                season_first_goals=player.historical_season_first_goals,
+                season_games_played=player.historical_season_games_played,
+            ),
+        )
         rows.append(
             PlayerProjectionCandidate(
                 game_id=game_id,
@@ -185,10 +191,7 @@ def _project_team_candidates(
                 player_name=player.player_name,
                 projected_team_name=team_name,
                 model_probability=round(probability, 4),
-                historical_production=PlayerHistoricalProduction(
-                    season_first_goals=player.historical_season_first_goals,
-                    season_games_played=player.historical_season_games_played,
-                ),
+                historical_production=player_historical,
                 roster_eligibility=PlayerRosterEligibility(
                     active_team_name=player.active_team_name,
                     is_active_roster=player.is_active_roster,
@@ -270,6 +273,45 @@ def _load_artifact(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {"schema_version": 1, "projections": []}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_player_first_goal_history(path: Path) -> dict[str, PlayerHistoricalProduction]:
+    payload = _load_artifact(path)
+    projections = payload.get("projections")
+    if not isinstance(projections, list):
+        return {}
+
+    history: dict[str, PlayerHistoricalProduction] = {}
+    for row in projections:
+        if not isinstance(row, dict):
+            continue
+        raw_player_id = row.get("nhl_player_id", row.get("player_id"))
+        if not isinstance(raw_player_id, str) or not raw_player_id.strip():
+            continue
+        player_id = raw_player_id.strip()
+        first_goals = _as_float(row.get("historical_season_first_goals"))
+        games_played = _as_float(row.get("historical_season_games_played"))
+        if first_goals is None and games_played is None:
+            continue
+        current = history.get(player_id)
+        if current is None:
+            history[player_id] = PlayerHistoricalProduction(
+                season_first_goals=first_goals,
+                season_games_played=games_played,
+            )
+            continue
+
+        history[player_id] = PlayerHistoricalProduction(
+            season_first_goals=max(_history_value(current.season_first_goals), _history_value(first_goals)),
+            season_games_played=max(_history_value(current.season_games_played), _history_value(games_played)),
+        )
+    return history
+
+
+def _history_value(value: float | None) -> float:
+    if value is None:
+        return 0.0
+    return value
 
 
 def _slug(value: str) -> str:

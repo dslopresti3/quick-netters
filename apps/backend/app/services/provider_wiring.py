@@ -9,11 +9,7 @@ from app.services.interfaces import OddsProvider, ProjectionProvider, SchedulePr
 from app.services.dev_projection_provider import ActiveRosterRepository, AutoGeneratingProjectionProvider
 from app.services.mock_services import MockGamesService, MockOddsService, MockProjectionService, ValueRecommendationService
 from app.services.odds_provider import LiveOddsProvider
-from app.services.projection_store import (
-    JsonArtifactProjectionStore,
-    StoreBackedProjectionProvider,
-    build_real_projection_data_source_from_env,
-)
+from app.services.projection_store import build_real_projection_data_source_from_env
 from app.services.real_services import NhlScheduleProvider
 
 
@@ -51,12 +47,8 @@ def build_provider_registry_from_env() -> ProviderRegistry:
     else:
         schedule_provider = NhlScheduleProvider()
         projection_source = build_real_projection_data_source_from_env()
-        base_projection_provider = StoreBackedProjectionProvider(
-            store=JsonArtifactProjectionStore(artifact_path=projection_source.artifact_path)
-        )
         roster_path = Path(__file__).resolve().parents[1] / "data" / "rosters" / "current_active_rosters.json"
         projection_provider = AutoGeneratingProjectionProvider(
-            base_provider=base_projection_provider,
             schedule_provider=schedule_provider,
             artifact_path=projection_source.artifact_path,
             roster_repository=ActiveRosterRepository(roster_path=roster_path),

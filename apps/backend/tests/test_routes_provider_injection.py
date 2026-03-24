@@ -275,7 +275,7 @@ def test_date_availability_ready_when_all_data_is_available() -> None:
 
 
 def test_games_route_real_schedule_provider_non_empty_with_upstream_payload() -> None:
-    selected_date = date(2026, 3, 23)
+    selected_date = date.today()
     schedule_provider = NhlScheduleProvider()
     providers = _registry_with(
         schedule_provider=schedule_provider,
@@ -285,12 +285,12 @@ def test_games_route_real_schedule_provider_non_empty_with_upstream_payload() ->
     payload = {
         "gameWeek": [
             {
-                "date": "2026-03-23",
+                "date": selected_date.isoformat(),
                 "games": [
                     {
                         "id": 2026020101,
-                        "gameDate": "2026-03-24",
-                        "startTimeUTC": "2026-03-24T01:00:00Z",
+                        "gameDate": selected_date.isoformat(),
+                        "startTimeUTC": datetime.combine(selected_date, time(1, 0), tzinfo=timezone.utc).isoformat(),
                         "gameState": "FUT",
                         "awayTeam": {"commonName": {"default": "Devils"}},
                         "homeTeam": {"commonName": {"default": "Islanders"}},
@@ -320,7 +320,7 @@ def test_games_route_real_schedule_provider_non_empty_with_upstream_payload() ->
 
 
 def test_games_route_includes_note_when_schedule_fetch_fails() -> None:
-    selected_date = date(2026, 3, 23)
+    selected_date = date.today()
     schedule_provider = NhlScheduleProvider()
     providers = _registry_with(
         schedule_provider=schedule_provider,
@@ -332,4 +332,4 @@ def test_games_route_includes_note_when_schedule_fetch_fails() -> None:
         response = get_games(date=selected_date, providers=providers)
 
     assert response.games == []
-    assert any("NHL schedule fetch failed for 2026-03-23" in note for note in response.notes)
+    assert any(f"NHL schedule fetch failed for {selected_date.isoformat()}" in note for note in response.notes)
