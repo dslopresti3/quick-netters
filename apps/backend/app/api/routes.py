@@ -1,5 +1,6 @@
 from datetime import date
 import logging
+from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
@@ -141,13 +142,20 @@ def get_games(
     date: date = Query(..., description="UTC date to fetch games for"),
     providers: ProviderRegistry = Depends(get_provider_registry),
 ) -> GamesResponse:
+    request_started = perf_counter()
     logger.info("games route entry", extra={"selected_date": date.isoformat()})
     ensure_date_not_more_than_one_day_ahead(date)
     logger.info("games schedule fetch start", extra={"selected_date": date.isoformat()})
+    schedule_started = perf_counter()
     games = providers.schedule_provider.fetch(date)
+    schedule_elapsed_ms = round((perf_counter() - schedule_started) * 1000, 2)
     logger.info(
         "games schedule fetch end",
-        extra={"selected_date": date.isoformat(), "games_count_after_schedule_fetch": len(games)},
+        extra={
+            "selected_date": date.isoformat(),
+            "games_count_after_schedule_fetch": len(games),
+            "schedule_fetch_elapsed_ms": schedule_elapsed_ms,
+        },
     )
     schedule_fetch_failure_note = _schedule_fetch_failure_note(providers)
     if schedule_fetch_failure_note is not None and len(games) == 0:
@@ -157,10 +165,16 @@ def get_games(
         extra={"selected_date": date.isoformat(), "games_count_before_recommendation_attachment": len(games)},
     )
     logger.info("games scorer attachment start", extra={"selected_date": date.isoformat()})
+    scorer_started = perf_counter()
     games = providers.recommendation_service.attach_top_projected_scorers(date, games)
+    scorer_elapsed_ms = round((perf_counter() - scorer_started) * 1000, 2)
     logger.info(
         "games scorer attachment end",
-        extra={"selected_date": date.isoformat(), "games_count_after_scorer_attachment": len(games)},
+        extra={
+            "selected_date": date.isoformat(),
+            "games_count_after_scorer_attachment": len(games),
+            "scorer_attachment_elapsed_ms": scorer_elapsed_ms,
+        },
     )
     logger.info(
         "Games after recommendation attachment",
@@ -199,6 +213,7 @@ def get_games(
             "projections_available": response.projections_available,
             "odds_available": response.odds_available,
             "notes_count": len(response.notes),
+            "total_request_elapsed_ms": round((perf_counter() - request_started) * 1000, 2),
         },
     )
     return response

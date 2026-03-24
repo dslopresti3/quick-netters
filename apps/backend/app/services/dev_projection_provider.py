@@ -6,6 +6,7 @@ import os
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Callable, Protocol
 
 from app.api.schemas import GameSummary
@@ -92,7 +93,15 @@ class ActiveRosterRepository:
 class NhlApiActiveRosterRepository:
     """Loads active roster directly from NHL API roster endpoint."""
 
+    def __init__(self) -> None:
+        self._cache_by_team_name: dict[str, list[ActiveRosterPlayer]] = {}
+
     def active_players_for_team(self, team_name: str) -> list[ActiveRosterPlayer]:
+        team_key = team_name.strip().lower()
+        cached = self._cache_by_team_name.get(team_key)
+        if cached is not None:
+            return [player for player in cached]
+
         team_abbrev = team_abbrev_for_name(team_name)
         if team_abbrev is None:
             logger.warning("No NHL team abbreviation mapping found", extra={"team_name": team_name})
@@ -109,6 +118,7 @@ class NhlApiActiveRosterRepository:
                     is_active_roster=True,
                 )
             )
+        self._cache_by_team_name[team_key] = [player for player in rows]
         return rows
 
 
@@ -138,16 +148,52 @@ class AutoGeneratingProjectionProvider(ProjectionProvider):
         self._roster_repository = roster_repository
         self._enable_dev_fallback = enable_dev_fallback
         self._history_loader = history_loader or _load_player_first_goal_history_from_artifact
+        self._generated_cache_by_date: dict[date, list[PlayerProjectionCandidate]] = {}
 
     def fetch_player_first_goal_projections(self, selected_date: date) -> list[PlayerProjectionCandidate]:
+        cached_generated = self._generated_cache_by_date.get(selected_date)
+        if cached_generated is not None:
+            logger.info(
+                "games projection cache hit",
+                extra={
+                    "selected_date": selected_date.isoformat(),
+                    "projection_count": len(cached_generated),
+                    "projection_cache_source": "memory",
+                },
+            )
+            return [row for row in cached_generated]
+
+        cached_artifact_rows = _load_projection_rows_for_date_from_artifact(self._artifact_path, selected_date)
+        if cached_artifact_rows:
+            logger.info(
+                "games projection cache hit",
+                extra={
+                    "selected_date": selected_date.isoformat(),
+                    "projection_count": len(cached_artifact_rows),
+                    "projection_cache_source": "artifact",
+                },
+            )
+            self._generated_cache_by_date[selected_date] = [row for row in cached_artifact_rows]
+            return cached_artifact_rows
+
         scheduled_games = self._schedule_provider.fetch(selected_date)
         if not scheduled_games:
             return []
 
+        active_rosters_started = perf_counter()
         eligible_player_pool = _build_eligible_player_pool(
             scheduled_games=scheduled_games,
             roster_repository=self._roster_repository,
             selected_date=selected_date,
+        )
+        active_rosters_elapsed_ms = round((perf_counter() - active_rosters_started) * 1000, 2)
+        logger.info(
+            "games active roster fetches timing",
+            extra={
+                "selected_date": selected_date.isoformat(),
+                "active_roster_fetches_elapsed_ms": active_rosters_elapsed_ms,
+                "eligible_player_pool_count": len(eligible_player_pool),
+            },
         )
         logger.info(
             "games player first-goal history fetch start",
@@ -156,36 +202,47 @@ class AutoGeneratingProjectionProvider(ProjectionProvider):
                 "eligible_player_count": len({candidate.player.player_id for candidate in eligible_player_pool}),
             },
         )
+        history_started = perf_counter()
         player_history = self._history_loader(
             selected_date,
             {candidate.player.player_id for candidate in eligible_player_pool},
             self._artifact_path,
         )
+        history_elapsed_ms = round((perf_counter() - history_started) * 1000, 2)
         logger.info(
             "games player first-goal history fetch end",
             extra={
                 "selected_date": selected_date.isoformat(),
                 "history_player_count": len(player_history),
+                "player_history_load_elapsed_ms": history_elapsed_ms,
             },
         )
 
         logger.info("games projection generation start", extra={"selected_date": selected_date.isoformat()})
+        generation_started = perf_counter()
         generated = _generate_candidates_from_eligible_player_pool(
             eligible_player_pool=eligible_player_pool,
             player_history=player_history,
         )
+        generation_elapsed_ms = round((perf_counter() - generation_started) * 1000, 2)
         logger.info(
             "games projection generation end",
-            extra={"selected_date": selected_date.isoformat(), "generated_projection_count": len(generated)},
+            extra={
+                "selected_date": selected_date.isoformat(),
+                "generated_projection_count": len(generated),
+                "projection_generation_elapsed_ms": generation_elapsed_ms,
+            },
         )
 
         if generated:
             _upsert_generated_rows(artifact_path=self._artifact_path, selected_date=selected_date, rows=generated)
+            self._generated_cache_by_date[selected_date] = [row for row in generated]
             return generated
 
         if self._enable_dev_fallback:
             generated = _generate_placeholder_candidates(scheduled_games=scheduled_games)
             _upsert_generated_rows(artifact_path=self._artifact_path, selected_date=selected_date, rows=generated)
+            self._generated_cache_by_date[selected_date] = [row for row in generated]
             return generated
 
         return []
@@ -403,7 +460,25 @@ def load_player_first_goal_history_from_nhl_api(
         eligible_player_ids=eligible_player_ids,
         path=path,
     )
+    season_key = _season_key(selected_date)
     missing_player_ids = sorted(player_id for player_id in eligible_player_ids if player_id not in cached_history)
+    resolved_from_memory = 0
+    for player_id in missing_player_ids[:]:
+        cached = _PLAYER_HISTORY_CACHE_BY_PLAYER_SEASON.get((player_id, season_key))
+        if cached is None:
+            continue
+        cached_history[player_id] = cached
+        missing_player_ids.remove(player_id)
+        resolved_from_memory += 1
+    if resolved_from_memory:
+        logger.info(
+            "Reused in-memory NHL player history cache",
+            extra={
+                "selected_date": selected_date.isoformat(),
+                "season_key": season_key,
+                "resolved_from_memory_count": resolved_from_memory,
+            },
+        )
 
     max_live_history_requests = max(
         0,
@@ -429,7 +504,9 @@ def load_player_first_goal_history_from_nhl_api(
     fetch_budget = min(max_live_history_requests, len(missing_player_ids))
     for player_id in missing_player_ids[:fetch_budget]:
         try:
-            cached_history[player_id] = fetch_player_first_goal_history(player_id=player_id, selected_date=selected_date)
+            production = fetch_player_first_goal_history(player_id=player_id, selected_date=selected_date)
+            cached_history[player_id] = production
+            _PLAYER_HISTORY_CACHE_BY_PLAYER_SEASON[(player_id, season_key)] = production
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Live NHL player history fetch failed; continuing without this player history",
@@ -460,6 +537,65 @@ def _history_value(value: float | None) -> float:
     return value
 
 
+def _season_key(selected_date: date) -> str:
+    start_year = selected_date.year if selected_date.month >= 9 else selected_date.year - 1
+    return f"{start_year}{start_year + 1}"
+
+
+def _load_projection_rows_for_date_from_artifact(path: Path, selected_date: date) -> list[PlayerProjectionCandidate]:
+    payload = _load_artifact(path)
+    projections = payload.get("projections")
+    if not isinstance(projections, list):
+        return []
+
+    rows: list[PlayerProjectionCandidate] = []
+    selected_date_iso = selected_date.isoformat()
+    for row in projections:
+        if not isinstance(row, dict):
+            continue
+        if row.get("date") != selected_date_iso:
+            continue
+        player_id_raw = row.get("nhl_player_id", row.get("player_id"))
+        if not isinstance(player_id_raw, str) or not player_id_raw.strip():
+            continue
+        game_id_raw = row.get("game_id")
+        player_name_raw = row.get("player_name")
+        team_name_raw = row.get("team_name")
+        active_team_name_raw = row.get("active_team_name", team_name_raw)
+        probability_raw = row.get("model_probability", row.get("probability"))
+        if not isinstance(game_id_raw, str) or not game_id_raw.strip():
+            continue
+        if not isinstance(player_name_raw, str) or not player_name_raw.strip():
+            continue
+        if not isinstance(team_name_raw, str) or not team_name_raw.strip():
+            continue
+        if not isinstance(active_team_name_raw, str) or not active_team_name_raw.strip():
+            continue
+        if not isinstance(probability_raw, (int, float)):
+            continue
+        probability = float(probability_raw)
+        if not (0 < probability < 1):
+            continue
+        rows.append(
+            PlayerProjectionCandidate(
+                game_id=game_id_raw.strip(),
+                nhl_player_id=player_id_raw.strip(),
+                player_name=player_name_raw.strip(),
+                projected_team_name=team_name_raw.strip(),
+                model_probability=probability,
+                historical_production=PlayerHistoricalProduction(
+                    season_first_goals=_as_float(row.get("historical_season_first_goals")),
+                    season_games_played=_as_float(row.get("historical_season_games_played")),
+                ),
+                roster_eligibility=PlayerRosterEligibility(
+                    active_team_name=active_team_name_raw.strip(),
+                    is_active_roster=bool(row.get("is_active_roster", True)),
+                ),
+            )
+        )
+    return rows
+
+
 def _slug(value: str) -> str:
     lowered = value.lower().strip()
     chars = [ch if ch.isalnum() else "-" for ch in lowered]
@@ -473,3 +609,6 @@ def _as_float(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     return None
+
+
+_PLAYER_HISTORY_CACHE_BY_PLAYER_SEASON: dict[tuple[str, str], PlayerHistoricalProduction] = {}

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import date, datetime, timezone
+from time import perf_counter
 from zoneinfo import ZoneInfo
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -21,12 +22,22 @@ class NhlScheduleProvider(ScheduleProvider):
 
     def __init__(self) -> None:
         self.last_fetch_error: str | None = None
+        self._cache_by_date: dict[date, list[GameSummary]] = {}
 
     def fetch(self, selected_date: date) -> list[GameSummary]:
+        cached = self._cache_by_date.get(selected_date)
+        if cached is not None:
+            logger.info(
+                "NHL schedule cache hit",
+                extra={"selected_date": selected_date.isoformat(), "cached_games_count": len(cached)},
+            )
+            return [game.model_copy(deep=True) for game in cached]
+
         self.last_fetch_error = None
         url = f"{self.base_url}/{selected_date.isoformat()}"
         headers = dict(BROWSER_LIKE_HEADERS)
         opener = build_no_proxy_opener()
+        fetch_started = perf_counter()
         logger.info(
             "Fetching NHL schedule",
             extra={
@@ -38,9 +49,15 @@ class NhlScheduleProvider(ScheduleProvider):
         )
         try:
             payload = fetch_json(url=url, headers=headers, timeout_seconds=10, opener=opener)
+            fetch_elapsed_ms = round((perf_counter() - fetch_started) * 1000, 2)
             logger.info(
                 "NHL schedule JSON parse status",
-                extra={"selected_date": selected_date.isoformat(), "url": url, "json_parse_succeeded": True},
+                extra={
+                    "selected_date": selected_date.isoformat(),
+                    "url": url,
+                    "json_parse_succeeded": True,
+                    "schedule_fetch_elapsed_ms": fetch_elapsed_ms,
+                },
             )
             logger.info(
                 "NHL upstream raw schedule response",
@@ -56,6 +73,7 @@ class NhlScheduleProvider(ScheduleProvider):
                 },
             )
         except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+            fetch_elapsed_ms = round((perf_counter() - fetch_started) * 1000, 2)
             self.last_fetch_error = f"NHL schedule fetch failed for {selected_date.isoformat()} from {url}: {exc}"
             logger.warning(
                 "NHL schedule fetch failed",
@@ -65,11 +83,14 @@ class NhlScheduleProvider(ScheduleProvider):
                     "error": str(exc),
                     "json_parse_succeeded": False,
                     "schedule_fetch_error_note": self.last_fetch_error,
+                    "schedule_fetch_elapsed_ms": fetch_elapsed_ms,
                 },
             )
             return []
 
-        return _map_schedule_payload(payload, selected_date=selected_date)
+        mapped = _map_schedule_payload(payload, selected_date=selected_date)
+        self._cache_by_date[selected_date] = [game.model_copy(deep=True) for game in mapped]
+        return mapped
 
 def _map_schedule_payload(payload: dict[str, Any], selected_date: date | None = None) -> list[GameSummary]:
     extracted_games = _extract_games(payload)
