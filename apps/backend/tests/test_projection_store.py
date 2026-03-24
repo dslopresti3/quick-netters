@@ -146,11 +146,12 @@ def test_store_backed_provider_returns_empty_when_artifact_is_invalid(tmp_path) 
 
 def test_recommendation_routes_integrate_with_store_backed_projections(tmp_path) -> None:
     artifact = tmp_path / "projections.json"
+    selected_date = date.today()
     _write_artifact(
         artifact,
         [
             {
-                "date": "2026-03-23",
+                "date": selected_date.isoformat(),
                 "game_id": "g-nyr-vs-bos",
                 "player_id": "p-artemi-panarin",
                 "player_name": "Artemi Panarin",
@@ -174,7 +175,7 @@ def test_recommendation_routes_integrate_with_store_backed_projections(tmp_path)
         ),
     )
 
-    payload = get_games(date=date(2026, 3, 23), providers=registry)
+    payload = get_games(date=selected_date, providers=registry)
     target_game = next(game for game in payload.games if game.game_id == "g-nyr-vs-bos")
 
     assert payload.projections_available is True
@@ -184,11 +185,12 @@ def test_recommendation_routes_integrate_with_store_backed_projections(tmp_path)
 
 def test_attach_top_projected_scorers_preserves_games_when_projections_missing(tmp_path) -> None:
     artifact = tmp_path / "projections.json"
+    selected_date = date.today()
     _write_artifact(
         artifact,
         [
             {
-                "date": "2026-03-23",
+                "date": selected_date.isoformat(),
                 "game_id": "g-nyr-vs-bos",
                 "player_id": "p-away-top",
                 "player_name": "Away Top",
@@ -196,7 +198,7 @@ def test_attach_top_projected_scorers_preserves_games_when_projections_missing(t
                 "model_probability": 0.32,
             },
             {
-                "date": "2026-03-23",
+                "date": selected_date.isoformat(),
                 "game_id": "g-nyr-vs-bos",
                 "player_id": "p-home-top",
                 "player_name": "Home Top",
@@ -220,7 +222,7 @@ def test_attach_top_projected_scorers_preserves_games_when_projections_missing(t
         ),
     )
 
-    payload = get_games(date=date(2026, 3, 23), providers=registry)
+    payload = get_games(date=selected_date, providers=registry)
     games_by_id = {game.game_id: game for game in payload.games}
 
     assert len(payload.games) == 3
@@ -233,11 +235,12 @@ def test_attach_top_projected_scorers_preserves_games_when_projections_missing(t
 
 def test_attach_top_projected_scorers_attaches_highest_probability_per_team(tmp_path) -> None:
     artifact = tmp_path / "projections.json"
+    selected_date = date.today()
     _write_artifact(
         artifact,
         [
             {
-                "date": "2026-03-23",
+                "date": selected_date.isoformat(),
                 "game_id": "g-nyr-vs-bos",
                 "player_id": "p-away-second",
                 "player_name": "Away Second",
@@ -245,7 +248,7 @@ def test_attach_top_projected_scorers_attaches_highest_probability_per_team(tmp_
                 "model_probability": 0.15,
             },
             {
-                "date": "2026-03-23",
+                "date": selected_date.isoformat(),
                 "game_id": "g-nyr-vs-bos",
                 "player_id": "p-away-top",
                 "player_name": "Away Top",
@@ -253,7 +256,7 @@ def test_attach_top_projected_scorers_attaches_highest_probability_per_team(tmp_
                 "model_probability": 0.33,
             },
             {
-                "date": "2026-03-23",
+                "date": selected_date.isoformat(),
                 "game_id": "g-nyr-vs-bos",
                 "player_id": "p-home-top",
                 "player_name": "Home Top",
@@ -272,8 +275,8 @@ def test_attach_top_projected_scorers_attaches_highest_probability_per_team(tmp_
         odds_provider=odds_provider,
     )
 
-    games = schedule_provider.fetch(date(2026, 3, 23))
-    enriched_games = service.attach_top_projected_scorers(date(2026, 3, 23), games)
+    games = schedule_provider.fetch(selected_date)
+    enriched_games = service.attach_top_projected_scorers(selected_date, games)
     games_by_id = {game.game_id: game for game in enriched_games}
 
     assert len(enriched_games) == 3
@@ -301,7 +304,8 @@ def test_games_stay_visible_when_no_projection_rows_exist_for_date(tmp_path) -> 
         ),
     )
 
-    payload = get_games(date=date(2026, 3, 23), providers=registry)
+    selected_date = date.today()
+    payload = get_games(date=selected_date, providers=registry)
 
     assert len(payload.games) == 3
     assert payload.projections_available is False
@@ -311,11 +315,12 @@ def test_games_stay_visible_when_no_projection_rows_exist_for_date(tmp_path) -> 
 
 def test_store_backed_projection_artifact_attaches_team_leaders_for_game_2025021119_with_team_alias_match(tmp_path) -> None:
     artifact = tmp_path / "projections.json"
+    selected_date = date.today()
     _write_artifact(
         artifact,
         [
             {
-                "date": "2026-03-23",
+                "date": selected_date.isoformat(),
                 "game_id": "2025021119",
                 "player_id": "p-away-top",
                 "player_name": "Away Top",
@@ -323,7 +328,7 @@ def test_store_backed_projection_artifact_attaches_team_leaders_for_game_2025021
                 "model_probability": 0.26,
             },
             {
-                "date": "2026-03-23",
+                "date": selected_date.isoformat(),
                 "game_id": "2025021119",
                 "player_id": "p-away-secondary",
                 "player_name": "Away Secondary",
@@ -331,7 +336,7 @@ def test_store_backed_projection_artifact_attaches_team_leaders_for_game_2025021
                 "model_probability": 0.13,
             },
             {
-                "date": "2026-03-23",
+                "date": selected_date.isoformat(),
                 "game_id": "2025021119",
                 "player_id": "p-home-top",
                 "player_name": "Home Top",
@@ -339,7 +344,7 @@ def test_store_backed_projection_artifact_attaches_team_leaders_for_game_2025021
                 "model_probability": 0.31,
             },
             {
-                "date": "2026-03-23",
+                "date": selected_date.isoformat(),
                 "game_id": "2025021119",
                 "player_id": "p-home-secondary",
                 "player_name": "Home Secondary",
@@ -351,12 +356,12 @@ def test_store_backed_projection_artifact_attaches_team_leaders_for_game_2025021
 
     class _SingleGameScheduleProvider:
         def fetch(self, selected_date: date) -> list[GameSummary]:
-            if selected_date != date(2026, 3, 23):
+            if selected_date != date.today():
                 return []
             return [
                 GameSummary(
                     game_id="2025021119",
-                    game_time=datetime(2026, 3, 23, 23, 0, tzinfo=timezone.utc),
+                    game_time=datetime.combine(date.today(), datetime.min.time(), tzinfo=timezone.utc),
                     away_team="Chicago",
                     home_team="Minnesota",
                     status="FUT",
@@ -377,7 +382,7 @@ def test_store_backed_projection_artifact_attaches_team_leaders_for_game_2025021
         ),
     )
 
-    payload = get_games(date=date(2026, 3, 23), providers=registry)
+    payload = get_games(date=selected_date, providers=registry)
 
     assert payload.projections_available is True
     assert len(payload.games) == 1
@@ -429,11 +434,12 @@ def test_projection_availability_false_when_rows_are_invalid_or_unmatched() -> N
         odds_provider=odds_provider,
     )
 
-    games = schedule_provider.fetch(date(2026, 3, 23))
-    enriched_games = service.attach_top_projected_scorers(date(2026, 3, 23), games)
+    selected_date = date.today()
+    games = schedule_provider.fetch(selected_date)
+    enriched_games = service.attach_top_projected_scorers(selected_date, games)
 
     assert len(enriched_games) == 3
-    assert service.projections_available(date(2026, 3, 23)) is False
+    assert service.projections_available(selected_date) is False
     assert all(game.away_top_projected_scorer is None for game in enriched_games)
     assert all(game.home_top_projected_scorer is None for game in enriched_games)
 
@@ -485,7 +491,8 @@ def test_traded_player_keeps_historical_totals_but_only_new_team_is_eligible(tmp
         odds_provider=odds_provider,
     )
 
-    games = schedule_provider.fetch(date(2026, 3, 23))
+    selected_date = date.today()
+    games = schedule_provider.fetch(selected_date)
     game = next(item for item in service.attach_top_projected_scorers(date(2026, 3, 23), games) if item.game_id == "g-nyr-vs-bos")
     assert game.away_top_projected_scorer is None
     assert game.home_top_projected_scorer is not None
@@ -519,7 +526,8 @@ def test_inactive_non_roster_player_is_excluded_from_top_scorer_and_recommendati
         odds_provider=odds_provider,
     )
 
-    games = schedule_provider.fetch(date(2026, 3, 23))
+    selected_date = date.today()
+    games = schedule_provider.fetch(selected_date)
     game = next(item for item in service.attach_top_projected_scorers(date(2026, 3, 23), games) if item.game_id == "g-nyr-vs-bos")
     assert game.away_top_projected_scorer is None
     assert game.home_top_projected_scorer is None
