@@ -112,13 +112,17 @@ class ProjectionArtifactDataSource:
 
 
 def build_real_projection_provider_from_env() -> StoreBackedProjectionProvider:
-    projection_source = ProjectionArtifactDataSource.real_from_env()
+    projection_source = build_real_projection_data_source_from_env()
     return StoreBackedProjectionProvider(store=JsonArtifactProjectionStore(artifact_path=projection_source.artifact_path))
 
 
 def build_mock_projection_provider() -> StoreBackedProjectionProvider:
     projection_source = ProjectionArtifactDataSource.mock_default()
     return StoreBackedProjectionProvider(store=JsonArtifactProjectionStore(artifact_path=projection_source.artifact_path))
+
+
+def build_real_projection_data_source_from_env() -> ProjectionArtifactDataSource:
+    return ProjectionArtifactDataSource.real_from_env()
 
 
 def _parse_projection_payload(payload: dict[str, Any], selected_date: date) -> list[PlayerFirstGoalProjectionRow]:
