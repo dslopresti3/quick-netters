@@ -18,8 +18,9 @@ export function DatePickerForm({ defaultDate, minDate, maxDate, submitLabel, act
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York";
     startTransition(() => {
-      router.push(`${actionPath}?date=${selectedDate}`);
+      router.push(`${actionPath}?date=${selectedDate}&timezone=${encodeURIComponent(userTimezone)}`);
     });
   };
 

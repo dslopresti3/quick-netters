@@ -1,6 +1,7 @@
 from datetime import date
 import logging
 from time import perf_counter
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
@@ -8,6 +9,7 @@ from app.api.schemas import (
     DailyRecommendationsResponse,
     DateAvailabilityResponse,
     GameRecommendationsResponse,
+    GameSummary,
     GamesResponse,
 )
 from app.services.provider_wiring import ProviderRegistry
@@ -19,6 +21,7 @@ from app.utils.date_validation import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+DEFAULT_DISPLAY_TIMEZONE = "America/New_York"
 
 
 def get_provider_registry(request: Request) -> ProviderRegistry:
@@ -129,6 +132,32 @@ def _schedule_fetch_failure_note(providers: ProviderRegistry) -> str | None:
     return None
 
 
+def _resolve_display_timezone(display_timezone: str | None) -> str:
+    if isinstance(display_timezone, str) and display_timezone.strip():
+        candidate = display_timezone.strip()
+        try:
+            ZoneInfo(candidate)
+            return candidate
+        except ZoneInfoNotFoundError:
+            pass
+    return DEFAULT_DISPLAY_TIMEZONE
+
+
+def _with_display_times(games: list[GameSummary], display_timezone: str) -> list[GameSummary]:
+    zone = ZoneInfo(display_timezone)
+    localized_games = []
+    for game in games:
+        localized_games.append(
+            game.model_copy(
+                update={
+                    "display_game_time": game.game_time.astimezone(zone).strftime("%Y-%m-%d %I:%M %p"),
+                    "display_timezone": display_timezone,
+                }
+            )
+        )
+    return localized_games
+
+
 @router.get("/availability/date", response_model=DateAvailabilityResponse)
 def get_date_availability(
     date: date = Query(..., description="UTC date to validate and check data coverage for"),
@@ -140,6 +169,7 @@ def get_date_availability(
 @router.get("/games", response_model=GamesResponse)
 def get_games(
     date: date = Query(..., description="UTC date to fetch games for"),
+    timezone: str | None = Query(default=None, description="Optional IANA timezone for display formatting"),
     providers: ProviderRegistry = Depends(get_provider_registry),
 ) -> GamesResponse:
     request_started = perf_counter()
@@ -200,7 +230,7 @@ def get_games(
         )
     response = GamesResponse(
         date=date,
-        games=games,
+        games=_with_display_times(games, _resolve_display_timezone(timezone)),
         projections_available=projections_available,
         odds_available=odds_available,
         notes=notes,
@@ -240,6 +270,7 @@ def get_daily_recommendations(
 def get_game_recommendations(
     game_id: str = Query(..., description="Game id"),
     date: date = Query(..., description="UTC date to fetch game recommendations for"),
+    timezone: str | None = Query(default=None, description="Optional IANA timezone for display formatting"),
     providers: ProviderRegistry = Depends(get_provider_registry),
 ) -> GameRecommendationsResponse:
     ensure_date_not_more_than_one_day_ahead(date)
@@ -251,9 +282,10 @@ def get_game_recommendations(
 
     recommendations = providers.recommendation_service.fetch_for_game(date, game_id)
     projections_available, odds_available, notes = _availability_notes(date, providers)
+    localized_game = _with_display_times([games_by_id[game_id]], _resolve_display_timezone(timezone))[0]
     return GameRecommendationsResponse(
         date=date,
-        game=games_by_id[game_id],
+        game=localized_game,
         recommendations=recommendations,
         projections_available=projections_available,
         odds_available=odds_available,

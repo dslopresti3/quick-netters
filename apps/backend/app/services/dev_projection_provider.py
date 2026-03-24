@@ -855,14 +855,23 @@ def _rows_match_scheduled_slate(
 ) -> bool:
     if not rows:
         return False
+    observed_teams_by_game_id: dict[str, set[str]] = {}
     for row in rows:
         game_id = row.game_id.strip()
         if game_id not in valid_game_ids:
             return False
         valid_teams = valid_teams_by_game_id.get(game_id, set())
-        if row.projected_team_name.strip().lower() not in valid_teams:
+        projected_team = row.projected_team_name.strip().lower()
+        active_team = row.roster_eligibility.active_team_name.strip().lower()
+        if projected_team not in valid_teams:
             return False
-        if row.roster_eligibility.active_team_name.strip().lower() not in valid_teams:
+        if active_team not in valid_teams:
+            return False
+        observed_teams_by_game_id.setdefault(game_id, set()).add(projected_team)
+
+    for game_id, valid_teams in valid_teams_by_game_id.items():
+        observed_teams = observed_teams_by_game_id.get(game_id, set())
+        if not valid_teams.issubset(observed_teams):
             return False
     return True
 

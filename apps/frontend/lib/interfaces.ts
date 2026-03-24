@@ -24,6 +24,8 @@ export interface TeamProjectionLeader {
 export interface GameSummary {
   game_id: string;
   game_time: string;
+  display_game_time?: string;
+  display_timezone?: string;
   away_team: string;
   home_team: string;
   away_top_projected_scorer?: TeamProjectionLeader;
