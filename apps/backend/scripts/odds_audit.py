@@ -70,7 +70,7 @@ def run_audit(selected_date: date) -> OddsAuditReport:
     if isinstance(providers.odds_provider, LiveOddsProvider):
         client = providers.odds_provider._client  # noqa: SLF001
         if isinstance(client, TheOddsApiClient):
-            base_url = client.base_url
+            base_url = client.event_odds_url_template
             query_params = _query_params(client, selected_date)
             raw_events = client.fetch_raw_events(selected_date)
     elif hasattr(providers.odds_provider, "_provider"):
@@ -78,7 +78,7 @@ def run_audit(selected_date: date) -> OddsAuditReport:
         if isinstance(live_provider, LiveOddsProvider):
             client = live_provider._client  # noqa: SLF001
             if isinstance(client, TheOddsApiClient):
-                base_url = client.base_url
+                base_url = client.event_odds_url_template
                 query_params = _query_params(client, selected_date)
                 raw_events = client.fetch_raw_events(selected_date)
 

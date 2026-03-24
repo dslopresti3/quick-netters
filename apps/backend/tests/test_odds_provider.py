@@ -1,4 +1,7 @@
+import json
 from datetime import date, datetime, timedelta, timezone
+from io import BytesIO
+from unittest.mock import patch
 
 from app.services.odds_provider import TheOddsApiAdapter, TheOddsApiClient
 
@@ -110,3 +113,60 @@ def test_the_odds_api_adapter_skips_stale_rows() -> None:
 
     rows = TheOddsApiAdapter(source_name="the-odds-api").normalize(raw_events, now=now)
     assert rows == []
+
+
+def test_the_odds_api_client_fetches_event_odds_from_event_endpoints() -> None:
+    selected_date = date(2026, 3, 23)
+    events_payload = [
+        {"id": "evt-1"},
+        {"id": "evt-2"},
+        {"id": None},
+    ]
+    event_1_odds_payload = {
+        "id": "evt-1",
+        "away_team": "New York Rangers",
+        "home_team": "Boston Bruins",
+        "bookmakers": [],
+    }
+    event_2_odds_payload = {
+        "id": "evt-2",
+        "away_team": "Los Angeles Kings",
+        "home_team": "Seattle Kraken",
+        "bookmakers": [],
+    }
+
+    responses = [
+        BytesIO(json.dumps(events_payload).encode("utf-8")),
+        BytesIO(json.dumps(event_1_odds_payload).encode("utf-8")),
+        BytesIO(json.dumps(event_2_odds_payload).encode("utf-8")),
+    ]
+
+    class _Response:
+        def __init__(self, body: BytesIO):
+            self._body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self, *args, **kwargs):
+            return self._body.read(*args, **kwargs)
+
+    requested_urls: list[str] = []
+
+    def _fake_urlopen(request, timeout=10):  # noqa: ANN001
+        requested_urls.append(request.full_url)
+        return _Response(responses.pop(0))
+
+    client = TheOddsApiClient(api_key="test-key")
+    with patch("app.services.odds_provider.urlopen", side_effect=_fake_urlopen):
+        rows = client.fetch_raw_events(selected_date)
+
+    assert len(rows) == 2
+    assert rows[0]["id"] == "evt-1"
+    assert rows[1]["id"] == "evt-2"
+    assert "/events?" in requested_urls[0]
+    assert "/events/evt-1/odds?" in requested_urls[1]
+    assert "/events/evt-2/odds?" in requested_urls[2]
