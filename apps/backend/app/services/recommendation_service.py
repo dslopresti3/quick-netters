@@ -34,6 +34,8 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         self._schedule_provider = schedule_provider
         self._projection_provider = projection_provider
         self._odds_provider = odds_provider
+        self._projection_cache_by_date: dict[date, list[PlayerProjectionCandidate]] = {}
+        self._odds_cache_by_date: dict[date, list[NormalizedPlayerOdds]] = {}
 
     def fetch_daily(self, selected_date: date) -> list[Recommendation]:
         recommendations = self._build_ranked_recommendations(selected_date)
@@ -54,7 +56,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         projections = self._eligible_projection_candidates(selected_date, scheduled_games)
         if not projections:
             return False
-        snapshots = self._odds_provider.fetch_player_first_goal_odds(selected_date)
+        snapshots = self._odds_rows_for_date(selected_date)
         mapped_rows = self._map_odds_rows(selected_date, scheduled_games, projections, snapshots)
         return any(row.market_odds_american != 0 and not is_stale(row.snapshot_at) for row in mapped_rows)
 
@@ -169,7 +171,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         projections = self._eligible_projection_candidates(selected_date, scheduled_games)
         if not projections:
             return []
-        raw_odds_snapshots = self._odds_provider.fetch_player_first_goal_odds(selected_date)
+        raw_odds_snapshots = self._odds_rows_for_date(selected_date)
         odds_snapshots = self._map_odds_rows(selected_date, scheduled_games, projections, raw_odds_snapshots)
         games_by_id = {game.game_id: game for game in scheduled_games}
         projections_by_game_player = {(row.game_id, row.nhl_player_id): row for row in projections}
@@ -215,7 +217,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         return sorted(recommendations, key=lambda rec: (rec.ev, rec.edge, rec.model_probability), reverse=True)
 
     def _eligible_projection_candidates(self, selected_date: date, games: list[GameSummary] | None) -> list[PlayerProjectionCandidate]:
-        projection_rows = self._projection_provider.fetch_player_first_goal_projections(selected_date)
+        projection_rows = self._projection_rows_for_date(selected_date)
         if games is None:
             return [projection for projection in projection_rows if projection.roster_eligibility.is_active_roster]
 
@@ -237,6 +239,22 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
             eligible_rows.append(projection)
 
         return eligible_rows
+
+    def _projection_rows_for_date(self, selected_date: date) -> list[PlayerProjectionCandidate]:
+        cached = self._projection_cache_by_date.get(selected_date)
+        if cached is not None:
+            return cached
+        rows = self._projection_provider.fetch_player_first_goal_projections(selected_date)
+        self._projection_cache_by_date[selected_date] = rows
+        return rows
+
+    def _odds_rows_for_date(self, selected_date: date) -> list[NormalizedPlayerOdds]:
+        cached = self._odds_cache_by_date.get(selected_date)
+        if cached is not None:
+            return cached
+        rows = self._odds_provider.fetch_player_first_goal_odds(selected_date)
+        self._odds_cache_by_date[selected_date] = rows
+        return rows
 
     def _map_odds_rows(
         self,
