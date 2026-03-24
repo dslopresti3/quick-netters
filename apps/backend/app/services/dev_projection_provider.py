@@ -373,6 +373,8 @@ def _generate_candidates_from_eligible_player_pool(
     template: _ProjectionTemplate = _DEFAULT_TEMPLATE,
 ) -> list[PlayerProjectionCandidate]:
     rows: list[PlayerProjectionCandidate] = []
+    debug_game_id = os.getenv("GAMES_PROJECTION_DEBUG_GAME_ID", "").strip()
+    debug_logged = False
     team_candidates: dict[tuple[str, str], list[_EligiblePlayerCandidate]] = {}
     game_team_names: dict[str, set[str]] = {}
     for candidate in eligible_player_pool:
@@ -401,7 +403,7 @@ def _generate_candidates_from_eligible_player_pool(
             team_probability_by_game_team[key] = max(team_strength_by_game_team.get(key, 0.01), 0.01) / max(total_strength, 0.01)
 
     for rank_key, candidates in team_candidates.items():
-        scored_players: list[tuple[_EligiblePlayerCandidate, PlayerHistoricalProduction, float]] = []
+        scored_players: list[tuple[_EligiblePlayerCandidate, PlayerHistoricalProduction, float, float]] = []
         for candidate in candidates:
             player_historical = player_history.get(
                 candidate.player.player_id,
@@ -413,13 +415,59 @@ def _generate_candidates_from_eligible_player_pool(
                     season_first_period_goals=candidate.player.historical_season_first_period_goals,
                 ),
             )
-            scored_players.append((candidate, player_historical, _player_first_goal_score(player_historical, template)))
+            raw_player_score = _player_first_goal_score(player_historical, template)
+            games_played = max(_history_value(player_historical.season_games_played), 1.0)
+            shots_per_game = _history_value(player_historical.season_total_shots) / games_played
+            scored_players.append((candidate, player_historical, raw_player_score, shots_per_game))
 
-        total_player_score = sum(score for _, _, score in scored_players)
+        scored_players = [row for row in scored_players if row[2] > 0]
+        total_player_score = sum(score for _, _, score, _ in scored_players)
+        if total_player_score <= 0:
+            fallback_rows: list[tuple[_EligiblePlayerCandidate, PlayerHistoricalProduction, float, float]] = []
+            fallback_candidates = sorted(candidates, key=lambda row: row.player.player_name.lower())
+            fallback_size = len(fallback_candidates)
+            for idx, candidate in enumerate(fallback_candidates):
+                fallback_rows.append(
+                    (
+                        candidate,
+                        PlayerHistoricalProduction(
+                            season_first_goals=candidate.player.historical_season_first_goals,
+                            season_games_played=candidate.player.historical_season_games_played,
+                            season_total_goals=candidate.player.historical_season_total_goals,
+                            season_total_shots=candidate.player.historical_season_total_shots,
+                            season_first_period_goals=candidate.player.historical_season_first_period_goals,
+                        ),
+                        float(fallback_size - idx),
+                        0.0,
+                    )
+                )
+            scored_players = fallback_rows
+            total_player_score = sum(score for _, _, score, _ in scored_players)
+            logger.warning(
+                "games projection generation applied differentiated fallback scores",
+                extra={
+                    "game_id": rank_key[0],
+                    "projected_team_name": rank_key[1],
+                    "candidate_count": len(candidates),
+                },
+            )
         team_probability = team_probability_by_game_team.get(rank_key, 0.5)
-        for candidate, player_historical, player_score in sorted(scored_players, key=lambda row: (-row[2], row[0].player.player_name.lower())):
+        scored_sorted = sorted(scored_players, key=lambda row: (-row[2], row[0].player.player_name.lower()))
+        debug_rows: list[dict[str, Any]] = []
+        for candidate, player_historical, player_score, shots_per_game in scored_sorted:
             player_share_within_team = player_score / max(total_player_score, 1e-9)
             probability = team_probability * player_share_within_team
+            debug_rows.append(
+                {
+                    "player_name": candidate.player.player_name,
+                    "position": candidate.player.position_code,
+                    "season_first_goals": _history_value(player_historical.season_first_goals),
+                    "season_total_goals": _history_value(player_historical.season_total_goals),
+                    "shots_per_game": round(shots_per_game, 4),
+                    "player_score_before_normalization": round(player_score, 6),
+                    "final_probability_after_normalization": round(probability, 6),
+                }
+            )
             rows.append(
                 PlayerProjectionCandidate(
                     game_id=candidate.game_id,
@@ -434,6 +482,17 @@ def _generate_candidates_from_eligible_player_pool(
                         position_code=candidate.player.position_code,
                     ),
                 )
+            )
+        if debug_game_id and not debug_logged and rank_key[0] == debug_game_id:
+            debug_logged = True
+            logger.info(
+                "games projection debug for one game team",
+                extra={
+                    "game_id": rank_key[0],
+                    "team_name": rank_key[1],
+                    "candidate_count_before_filter": len(candidates),
+                    "candidate_rows": debug_rows,
+                },
             )
     return rows
 
@@ -685,7 +744,7 @@ def _player_first_goal_score(player_historical: PlayerHistoricalProduction, temp
             + template.shot_volume_weight * shots_per_game
             + template.first_period_goal_weight * first_period_goals
         ),
-        0.0001,
+        0.0,
     )
 
 
