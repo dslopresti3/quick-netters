@@ -68,7 +68,7 @@ def _raw_odds(name: str, away: str, home: str, start_time: datetime, *, team: st
 
 
 def test_game_mapping_by_team_and_time_drives_odds_available() -> None:
-    selected_date = date(2026, 3, 23)
+    selected_date = date.today()
     game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
     game = GameSummary(game_id="2026020001", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
     projections = [_projection("2026020001", "847123", "Artemi Panarin", "NY Rangers", "NY Rangers")]
@@ -84,7 +84,7 @@ def test_game_mapping_by_team_and_time_drives_odds_available() -> None:
 
 
 def test_player_mapping_by_team_and_name_aliases() -> None:
-    selected_date = date(2026, 3, 23)
+    selected_date = date.today()
     game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
     game = GameSummary(game_id="2026020001", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
     projections = [_projection("2026020001", "847123", "Artemi Panarin", "NY Rangers", "NY Rangers")]
@@ -102,7 +102,7 @@ def test_player_mapping_by_team_and_name_aliases() -> None:
 
 
 def test_active_roster_only_eligibility_and_traded_player_behavior() -> None:
-    selected_date = date(2026, 3, 23)
+    selected_date = date.today()
     game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
     game = GameSummary(game_id="2026020001", game_time=game_time, away_team="Colorado Avalanche", home_team="Dallas Stars")
     projections = [
@@ -126,7 +126,7 @@ def test_active_roster_only_eligibility_and_traded_player_behavior() -> None:
 
 
 def test_unmatched_odds_rows_and_stale_rows_are_excluded_without_breaking_response() -> None:
-    selected_date = date(2026, 3, 23)
+    selected_date = date.today()
     game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
     game = GameSummary(game_id="2026020001", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
     projections = [_projection("2026020001", "847123", "Artemi Panarin", "NY Rangers", "NY Rangers")]
@@ -172,3 +172,39 @@ def test_unmatched_odds_rows_and_stale_rows_are_excluded_without_breaking_respon
 
     assert service.fetch_daily(selected_date) == []
     assert service.odds_available(selected_date) is False
+
+
+def test_odds_mapping_does_not_require_provider_ids_to_equal_nhl_ids() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026020001", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
+    projections = [_projection("2026020001", "847123", "Artemi Panarin", "NY Rangers", "NY Rangers")]
+    odds_rows = [
+        NormalizedPlayerOdds(
+            nhl_game_id=None,
+            nhl_player_id=None,
+            market_odds_american=400,
+            snapshot_at=game_time - timedelta(minutes=3),
+            provider_name="the-odds-api",
+            provider_event_id="provider-event-999",
+            provider_player_id="provider-player-xyz",
+            provider_player_name_raw="Artemi Panarin",
+            provider_team_raw="New York Rangers",
+            away_team_raw="New York Rangers",
+            home_team_raw="Boston Bruins",
+            provider_start_time=game_time + timedelta(minutes=5),
+            freshness_status="fresh",
+            is_fresh=True,
+        )
+    ]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    recs = service.fetch_daily(selected_date)
+    assert len(recs) == 1
+    assert recs[0].game_id == "2026020001"
+    assert recs[0].player_id == "847123"

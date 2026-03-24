@@ -6,7 +6,6 @@ from app.api.schemas import GameSummary
 from app.services.dev_projection_provider import ActiveRosterRepository, AutoGeneratingProjectionProvider
 from app.services.interfaces import ScheduleProvider
 from app.services.mock_services import ValueRecommendationService
-from app.services.projection_store import JsonArtifactProjectionStore, StoreBackedProjectionProvider
 from app.services.provider_wiring import ProviderRegistry
 from app.services.real_services import EmptyOddsProvider
 
@@ -20,9 +19,7 @@ class _StaticScheduleProvider(ScheduleProvider):
 
 
 def _build_registry(artifact_path, schedule_provider: ScheduleProvider, roster_path) -> ProviderRegistry:
-    base_projection_provider = StoreBackedProjectionProvider(store=JsonArtifactProjectionStore(artifact_path))
     projection_provider = AutoGeneratingProjectionProvider(
-        base_provider=base_projection_provider,
         schedule_provider=schedule_provider,
         artifact_path=artifact_path,
         roster_repository=ActiveRosterRepository(roster_path=roster_path),
