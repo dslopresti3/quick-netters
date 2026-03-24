@@ -280,3 +280,51 @@ def test_recommendations_do_not_pull_odds_when_no_projections_exist() -> None:
 
     assert recs == []
     assert calls == ["projections"]
+
+
+def test_recommendation_fields_include_implied_probability_fair_odds_edge_and_ev() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026020001", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
+    projection = PlayerProjectionCandidate(
+        game_id="2026020001",
+        nhl_player_id="847123",
+        player_name="Artemi Panarin",
+        projected_team_name="NY Rangers",
+        model_probability=0.22,
+        historical_production=PlayerHistoricalProduction(season_first_goals=2, season_games_played=50),
+        roster_eligibility=PlayerRosterEligibility(active_team_name="NY Rangers", is_active_roster=True),
+    )
+    odds_rows = [_raw_odds("Artemi Panarin", "NY Rangers", "Boston Bruins", game_time, team="NY Rangers")]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider([projection]),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    recs = service.fetch_daily(selected_date)
+
+    assert len(recs) == 1
+    rec = recs[0]
+    assert rec.implied_probability == 0.2
+    assert rec.fair_odds == 355
+    assert rec.edge == 0.02
+    assert rec.ev == 0.1
+
+
+def test_event_mapping_matches_when_provider_start_time_has_non_utc_offset() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    provider_local_start = datetime.combine(selected_date, time(18, 0), tzinfo=timezone(timedelta(hours=-5)))
+    game = GameSummary(game_id="2026020001", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
+    projections = [_projection("2026020001", "847123", "Artemi Panarin", "NY Rangers", "NY Rangers")]
+    odds_rows = [_raw_odds("Artemi Panarin", "NY Rangers", "Boston Bruins", provider_local_start, team="NY Rangers")]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    assert service.odds_available(selected_date) is True
