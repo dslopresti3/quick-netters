@@ -31,7 +31,7 @@ _RAW_NHL_TEAM_ALIASES = (
     ("St. Louis Blues", "St Louis", "St. Louis", "Blues", "STL"),
     ("Tampa Bay Lightning", "Tampa Bay", "Lightning", "Bolts", "TBL"),
     ("Toronto Maple Leafs", "Toronto", "Maple Leafs", "Leafs", "TOR"),
-    ("Utah Hockey Club", "Utah", "UTAH", "UTA"),
+    ("Utah Hockey Club", "Utah Mammoth", "Mammoth", "Utah", "UTAH", "UTA"),
     ("Vancouver Canucks", "Vancouver", "Canucks", "VAN"),
     ("Vegas Golden Knights", "Vegas", "Golden Knights", "Knights", "VGK"),
     ("Washington Capitals", "Washington", "Capitals", "Caps", "WSH"),
