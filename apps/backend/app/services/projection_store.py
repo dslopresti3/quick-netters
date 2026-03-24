@@ -164,6 +164,8 @@ def _parse_projection_row(raw_row: dict[str, Any], idx: int) -> PlayerFirstGoalP
     season_first_goals_raw = raw_row.get("historical_season_first_goals")
     season_games_played_raw = raw_row.get("historical_season_games_played")
     probability_raw = raw_row.get("model_probability")
+    if probability_raw is None:
+        probability_raw = raw_row.get("probability")
 
     if not isinstance(projection_date_raw, str):
         raise ProjectionStoreValidationError(f"Projection row at index {idx} has an invalid or missing 'date'.")
