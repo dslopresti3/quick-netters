@@ -1,7 +1,7 @@
 from datetime import date
 from unittest.mock import patch
 
-from app.services.nhl_api_data import fetch_player_first_goal_history, fetch_team_roster_current
+from app.services.nhl_api_data import fetch_player_first_goal_history, fetch_team_roster_current, team_abbrev_for_name
 
 
 def test_fetch_team_roster_current_uses_nhl_roster_endpoint() -> None:
@@ -47,3 +47,10 @@ def test_fetch_player_first_goal_history_uses_nhl_player_game_log_endpoint() -> 
     assert seen["url"] == "https://api-web.nhle.com/v1/player/8478402/game-log/20252026/2"
     assert history.season_first_goals == 3.0
     assert history.season_games_played == 4.0
+
+
+def test_team_abbrev_for_name_resolves_schedule_common_names() -> None:
+    assert team_abbrev_for_name("Rangers") == "NYR"
+    assert team_abbrev_for_name("Bruins") == "BOS"
+    assert team_abbrev_for_name("Canadiens") == "MTL"
+

@@ -5,6 +5,7 @@ from datetime import date
 from typing import Any
 
 from app.services.http_client import fetch_json
+from app.services.identity import team_alias_tokens
 from app.services.interfaces import PlayerHistoricalProduction
 
 NHL_WEB_BASE = "https://api-web.nhle.com/v1"
@@ -42,12 +43,18 @@ TEAM_NAME_TO_ABBREV = {
     "tampa bay lightning": "TBL",
     "toronto maple leafs": "TOR",
     "utah hockey club": "UTA",
+    "utah mammoth": "UTA",
     "vancouver canucks": "VAN",
     "vegas golden knights": "VGK",
     "washington capitals": "WSH",
     "winnipeg jets": "WPG",
 }
 
+
+TEAM_TOKEN_TO_ABBREV: dict[str, str] = {}
+for _team_name, _abbrev in TEAM_NAME_TO_ABBREV.items():
+    for _token in team_alias_tokens(_team_name):
+        TEAM_TOKEN_TO_ABBREV.setdefault(_token, _abbrev)
 
 @dataclass(frozen=True)
 class NhlRosterPlayer:
@@ -57,7 +64,19 @@ class NhlRosterPlayer:
 
 
 def team_abbrev_for_name(team_name: str) -> str | None:
-    return TEAM_NAME_TO_ABBREV.get(team_name.strip().lower())
+    normalized = team_name.strip().lower()
+    if not normalized:
+        return None
+
+    direct = TEAM_NAME_TO_ABBREV.get(normalized)
+    if direct is not None:
+        return direct
+
+    for token in team_alias_tokens(team_name):
+        mapped = TEAM_TOKEN_TO_ABBREV.get(token)
+        if mapped is not None:
+            return mapped
+    return None
 
 
 def fetch_team_roster_current(team_abbrev: str) -> list[NhlRosterPlayer]:
