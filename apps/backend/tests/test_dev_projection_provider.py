@@ -1,5 +1,6 @@
 import json
 from datetime import date, datetime, timezone
+from unittest.mock import patch
 
 from app.api.schemas import GameSummary
 from app.services.dev_projection_provider import ActiveRosterRepository, AutoGeneratingProjectionProvider, NhlApiActiveRosterRepository
@@ -512,6 +513,74 @@ def test_history_load_is_filtered_to_active_roster_eligible_player_ids(tmp_path)
     assert seen_ids == {"8479323", "8477956"}
 
 
+def test_equal_history_players_use_ascending_name_tiebreaker_not_descending(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(artifact, [])
+    selected_date = date(2026, 3, 25)
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026032501",
+                    game_time=datetime(2026, 3, 25, 23, 0, tzinfo=timezone.utc),
+                    away_team="Boston Bruins",
+                    home_team="Buffalo Sabres",
+                )
+            ]
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(
+        json.dumps(
+            {
+                "players": [
+                    {"player_id": "a1", "player_name": "Viktor Arvidsson", "active_team_name": "Boston Bruins", "is_active_roster": True},
+                    {"player_id": "a2", "player_name": "Brad Marchand", "active_team_name": "Boston Bruins", "is_active_roster": True},
+                    {"player_id": "b1", "player_name": "Zach Metsa", "active_team_name": "Buffalo Sabres", "is_active_roster": True},
+                    {"player_id": "b2", "player_name": "Tage Thompson", "active_team_name": "Buffalo Sabres", "is_active_roster": True},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=ActiveRosterRepository(roster_path=roster_path),
+        history_loader=lambda selected_date, eligible_player_ids, path: {},
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+
+    bruins_rows = [row for row in rows if row.projected_team_name == "Boston Bruins"]
+    sabres_rows = [row for row in rows if row.projected_team_name == "Buffalo Sabres"]
+    assert bruins_rows[0].player_name == "Brad Marchand"
+    assert sabres_rows[0].player_name == "Tage Thompson"
+
+
+def test_history_loader_fetches_live_history_by_default_when_missing(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("NHL_HISTORY_MAX_LIVE_REQUESTS_PER_GAMES", raising=False)
+    monkeypatch.delenv("NHL_HISTORY_MAX_LIVE_REQUESTS_PER_GAME", raising=False)
+
+    calls: list[str] = []
+
+    def _fake_fetch(player_id: str, selected_date: date) -> PlayerHistoricalProduction:
+        calls.append(player_id)
+        return PlayerHistoricalProduction(season_first_goals=1.0, season_games_played=10.0)
+
+    with patch("app.services.dev_projection_provider.fetch_player_first_goal_history", side_effect=_fake_fetch):
+        from app.services.dev_projection_provider import load_player_first_goal_history_from_nhl_api
+
+        history = load_player_first_goal_history_from_nhl_api(
+            selected_date=date(2026, 3, 25),
+            eligible_player_ids={"8477956", "8478402"},
+            path=tmp_path / "missing-artifact.json",
+        )
+
+    assert set(calls) == {"8477956", "8478402"}
+    assert history["8477956"].season_first_goals == 1.0
+
+
 def test_real_mode_common_team_names_generate_rows_with_nhl_api_rosters(tmp_path, monkeypatch) -> None:
     artifact = tmp_path / "projections.json"
     _write_artifact(artifact, [])
@@ -556,4 +625,3 @@ def test_real_mode_common_team_names_generate_rows_with_nhl_api_rosters(tmp_path
 
     assert {row.player_name for row in rows} == {"Artemi Panarin", "David Pastrnak"}
     assert all(not row.nhl_player_id.startswith("dev-") for row in rows)
-

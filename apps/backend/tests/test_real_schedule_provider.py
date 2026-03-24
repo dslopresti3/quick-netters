@@ -98,7 +98,7 @@ def test_map_schedule_payload_uses_week_date_when_game_date_missing() -> None:
     assert games[0].game_time.isoformat() == "2026-03-24T02:30:00+00:00"
 
 
-def test_map_schedule_payload_keeps_games_when_game_date_is_utc_next_day() -> None:
+def test_map_schedule_payload_excludes_games_when_game_date_is_next_slate_day() -> None:
     payload = {
         "gameWeek": [
             {
@@ -119,10 +119,7 @@ def test_map_schedule_payload_keeps_games_when_game_date_is_utc_next_day() -> No
 
     games = _map_schedule_payload(payload, selected_date=date(2026, 3, 23))
 
-    assert len(games) == 1
-    assert games[0].game_id == "2026020101"
-    assert games[0].away_team == "Devils"
-    assert games[0].home_team == "Islanders"
+    assert games == []
 
 
 def test_schedule_provider_returns_empty_when_upstream_fails() -> None:
@@ -187,10 +184,10 @@ def test_schedule_provider_fetch_uses_browser_headers_and_parses_payload() -> No
     assert seen["headers"]["Accept"] == "application/json, text/plain, */*"
     assert seen["timeout_seconds"] == 10
     assert seen["opener"] is not None
-    assert len(games) == 1
+    assert games == []
 
 
-def test_map_schedule_payload_keeps_games_in_reasonable_window_from_selected_date() -> None:
+def test_map_schedule_payload_filters_to_selected_slate_date_only() -> None:
     payload = {
         "gameWeek": [
             {
@@ -230,7 +227,7 @@ def test_map_schedule_payload_keeps_games_in_reasonable_window_from_selected_dat
     }
 
     games = _map_schedule_payload(payload, selected_date=date(2026, 3, 24))
-    assert {game.game_id for game in games} == {"1", "2", "3"}
+    assert {game.game_id for game in games} == {"2"}
 
 
 def test_registry_real_mode_uses_live_schedule_provider() -> None:

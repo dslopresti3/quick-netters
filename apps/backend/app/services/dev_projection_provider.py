@@ -223,11 +223,10 @@ def _build_eligible_player_pool(
             ranked = sorted(
                 players,
                 key=lambda p: (
-                    p.historical_season_first_goals or 0.0,
-                    (p.historical_season_first_goals or 0.0) / max((p.historical_season_games_played or 82.0), 1.0),
-                    p.player_name,
+                    -(p.historical_season_first_goals or 0.0),
+                    -((p.historical_season_first_goals or 0.0) / max((p.historical_season_games_played or 82.0), 1.0)),
+                    p.player_name.lower(),
                 ),
-                reverse=True,
             )
             for player in ranked:
                 pool.append(
@@ -406,7 +405,15 @@ def load_player_first_goal_history_from_nhl_api(
     )
     missing_player_ids = sorted(player_id for player_id in eligible_player_ids if player_id not in cached_history)
 
-    max_live_history_requests = max(0, int(os.getenv("NHL_HISTORY_MAX_LIVE_REQUESTS_PER_GAMES", "0")))
+    max_live_history_requests = max(
+        0,
+        int(
+            os.getenv(
+                "NHL_HISTORY_MAX_LIVE_REQUESTS_PER_GAMES",
+                os.getenv("NHL_HISTORY_MAX_LIVE_REQUESTS_PER_GAME", "500"),
+            )
+        ),
+    )
     if max_live_history_requests == 0:
         if missing_player_ids:
             logger.warning(
