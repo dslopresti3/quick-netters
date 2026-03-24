@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 from time import perf_counter
 from typing import Any
 from urllib.error import HTTPError, URLError
+from zoneinfo import ZoneInfo
 
 from app.api.schemas import GameSummary
 from app.services.http_client import BROWSER_LIKE_HEADERS, build_no_proxy_opener, fetch_json
@@ -13,6 +14,7 @@ from app.services.interfaces import OddsProvider, PlayerProjectionCandidate, Pro
 from app.services.odds import NormalizedPlayerOdds
 
 logger = logging.getLogger(__name__)
+EASTERN_TIMEZONE = ZoneInfo("America/New_York")
 
 class NhlScheduleProvider(ScheduleProvider):
     """Fetch NHL schedule data from the official public NHL API."""
@@ -142,68 +144,17 @@ def _extract_games(payload: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(games, list):
         return [game for game in games if isinstance(game, dict)]
 
-    return []    
+    return []
 
 def _matches_selected_schedule_window(game: dict[str, Any], selected_date: date) -> bool:
-    game_date = _parse_date_hint(game.get("gameDate"))
-    if game_date is not None:
-        return game_date == selected_date
-
-    week_date = _parse_date_hint(game.get("_weekDate"))
     start_time_utc = game.get("startTimeUTC")
-    start_time_date = None
-    if isinstance(start_time_utc, str):
-        try:
-            start_time_date = _parse_utc_datetime(start_time_utc).date()
-        except ValueError:
-            start_time_date = None
-
-    if week_date is not None:
-        if week_date != selected_date:
-            return False
-        if start_time_date is None:
-            return True
-        return start_time_date == selected_date
-
-    if start_time_date is None:
+    if not isinstance(start_time_utc, str):
         return False
-    return start_time_date == selected_date
-
-
-def _extract_game_hint_dates(game: dict[str, Any]) -> tuple[set[date], set[date]]:
-    primary_hints: set[date] = set()
-    secondary_hints: set[date] = set()
-    parsed_game_date = _parse_date_hint(game.get("gameDate"))
-    if parsed_game_date is not None:
-        primary_hints.add(parsed_game_date)
-
-    start_time_utc = game.get("startTimeUTC")
-    if isinstance(start_time_utc, str):
-        parsed_start = _parse_start_time_hint(start_time_utc)
-        if parsed_start is not None:
-            primary_hints.add(parsed_start)
-
-    parsed_week_date = _parse_date_hint(game.get("_weekDate"))
-    if parsed_week_date is not None:
-        secondary_hints.add(parsed_week_date)
-    return primary_hints, secondary_hints
-
-
-def _parse_date_hint(raw_hint: Any) -> date | None:
-    if not isinstance(raw_hint, str) or len(raw_hint) < 10:
-        return None
     try:
-        return date.fromisoformat(raw_hint[:10])
+        eastern_local_date = _parse_utc_datetime(start_time_utc).astimezone(EASTERN_TIMEZONE).date()
     except ValueError:
-        return None
-
-
-def _parse_start_time_hint(raw_start_time: str) -> date | None:
-    try:
-        parsed = _parse_utc_datetime(raw_start_time)
-    except ValueError:
-        return None
-    return parsed.date()
+        return False
+    return eastern_local_date == selected_date
 
 
 def _map_game(game: dict[str, Any]) -> GameSummary | None:
