@@ -71,7 +71,7 @@ def test_map_schedule_payload_supports_top_level_games_shape() -> None:
     assert games[0].home_team == "Maple Leafs"
 
 
-def test_map_schedule_payload_uses_week_date_when_game_date_missing() -> None:
+def test_map_schedule_payload_includes_game_after_0000_utc_when_it_is_previous_eastern_day() -> None:
     payload = {
         "gameWeek": [
             {
@@ -89,12 +89,13 @@ def test_map_schedule_payload_uses_week_date_when_game_date_missing() -> None:
         ]
     }
 
-    games = _map_schedule_payload(payload, selected_date=date(2026, 3, 24))
+    games = _map_schedule_payload(payload, selected_date=date(2026, 3, 23))
 
-    assert games == []
+    assert len(games) == 1
+    assert games[0].game_id == "2026020099"
 
 
-def test_map_schedule_payload_uses_week_date_when_game_date_missing_and_start_time_matches_selected_day() -> None:
+def test_map_schedule_payload_excludes_game_when_it_is_truly_next_eastern_day() -> None:
     payload = {
         "gameWeek": [
             {
@@ -102,7 +103,7 @@ def test_map_schedule_payload_uses_week_date_when_game_date_missing_and_start_ti
                 "games": [
                     {
                         "id": 2026020100,
-                        "startTimeUTC": "2026-03-23T23:30:00Z",
+                        "startTimeUTC": "2026-03-24T04:30:00Z",
                         "gameState": "FUT",
                         "awayTeam": {"commonName": {"default": "Sharks"}},
                         "homeTeam": {"commonName": {"default": "Kings"}},
@@ -114,23 +115,28 @@ def test_map_schedule_payload_uses_week_date_when_game_date_missing_and_start_ti
 
     games = _map_schedule_payload(payload, selected_date=date(2026, 3, 23))
 
-    assert len(games) == 1
-    assert games[0].game_id == "2026020100"
+    assert games == []
 
 
-def test_map_schedule_payload_excludes_games_when_game_date_is_next_slate_day() -> None:
+def test_map_schedule_payload_uses_eastern_calendar_day_for_selected_slate() -> None:
     payload = {
         "gameWeek": [
             {
                 "date": "2026-03-23",
                 "games": [
                     {
-                        "id": 2026020101,
-                        "gameDate": "2026-03-24",
+                        "id": 2026020102,
                         "startTimeUTC": "2026-03-24T01:00:00Z",
                         "gameState": "FUT",
                         "awayTeam": {"commonName": {"default": "Devils"}},
                         "homeTeam": {"commonName": {"default": "Islanders"}},
+                    },
+                    {
+                        "id": 2026020103,
+                        "startTimeUTC": "2026-03-24T04:30:00Z",
+                        "gameState": "FUT",
+                        "awayTeam": {"commonName": {"default": "Panthers"}},
+                        "homeTeam": {"commonName": {"default": "Lightning"}},
                     }
                 ],
             }
@@ -139,7 +145,7 @@ def test_map_schedule_payload_excludes_games_when_game_date_is_next_slate_day() 
 
     games = _map_schedule_payload(payload, selected_date=date(2026, 3, 23))
 
-    assert games == []
+    assert {game.game_id for game in games} == {"2026020102"}
 
 
 def test_schedule_provider_returns_empty_when_upstream_fails() -> None:
@@ -176,7 +182,6 @@ def test_schedule_provider_fetch_uses_browser_headers_and_parses_payload() -> No
                 "games": [
                     {
                         "id": 2026020101,
-                        "gameDate": "2026-03-24",
                         "startTimeUTC": "2026-03-24T01:00:00Z",
                         "gameState": "FUT",
                         "awayTeam": {"commonName": {"default": "Devils"}},
@@ -204,7 +209,8 @@ def test_schedule_provider_fetch_uses_browser_headers_and_parses_payload() -> No
     assert seen["headers"]["Accept"] == "application/json, text/plain, */*"
     assert seen["timeout_seconds"] == 10
     assert seen["opener"] is not None
-    assert games == []
+    assert len(games) == 1
+    assert games[0].game_id == "2026020101"
 
 
 def test_map_schedule_payload_filters_to_selected_slate_date_only() -> None:
@@ -215,28 +221,24 @@ def test_map_schedule_payload_filters_to_selected_slate_date_only() -> None:
                 "games": [
                     {
                         "id": 1,
-                        "gameDate": "2026-03-23",
                         "startTimeUTC": "2026-03-23T23:00:00Z",
                         "awayTeam": {"commonName": {"default": "A"}},
                         "homeTeam": {"commonName": {"default": "B"}},
                     },
                     {
                         "id": 2,
-                        "gameDate": "2026-03-24",
                         "startTimeUTC": "2026-03-24T23:00:00Z",
                         "awayTeam": {"commonName": {"default": "C"}},
                         "homeTeam": {"commonName": {"default": "D"}},
                     },
                     {
                         "id": 3,
-                        "gameDate": "2026-03-25",
                         "startTimeUTC": "2026-03-25T01:00:00Z",
                         "awayTeam": {"commonName": {"default": "E"}},
                         "homeTeam": {"commonName": {"default": "F"}},
                     },
                     {
                         "id": 4,
-                        "gameDate": "2026-03-27",
                         "startTimeUTC": "2026-03-27T01:00:00Z",
                         "awayTeam": {"commonName": {"default": "G"}},
                         "homeTeam": {"commonName": {"default": "H"}},
@@ -247,7 +249,7 @@ def test_map_schedule_payload_filters_to_selected_slate_date_only() -> None:
     }
 
     games = _map_schedule_payload(payload, selected_date=date(2026, 3, 24))
-    assert {game.game_id for game in games} == {"2"}
+    assert {game.game_id for game in games} == {"2", "3"}
 
 
 def test_registry_real_mode_uses_live_schedule_provider() -> None:
