@@ -141,8 +141,14 @@ def get_games(
     date: date = Query(..., description="UTC date to fetch games for"),
     providers: ProviderRegistry = Depends(get_provider_registry),
 ) -> GamesResponse:
+    logger.info("games route entry", extra={"selected_date": date.isoformat()})
     ensure_date_not_more_than_one_day_ahead(date)
+    logger.info("games schedule fetch start", extra={"selected_date": date.isoformat()})
     games = providers.schedule_provider.fetch(date)
+    logger.info(
+        "games schedule fetch end",
+        extra={"selected_date": date.isoformat(), "games_count_after_schedule_fetch": len(games)},
+    )
     schedule_fetch_failure_note = _schedule_fetch_failure_note(providers)
     if schedule_fetch_failure_note is not None and len(games) == 0:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=schedule_fetch_failure_note)
@@ -150,7 +156,12 @@ def get_games(
         "Games fetched before recommendation attachment",
         extra={"selected_date": date.isoformat(), "games_count_before_recommendation_attachment": len(games)},
     )
+    logger.info("games scorer attachment start", extra={"selected_date": date.isoformat()})
     games = providers.recommendation_service.attach_top_projected_scorers(date, games)
+    logger.info(
+        "games scorer attachment end",
+        extra={"selected_date": date.isoformat(), "games_count_after_scorer_attachment": len(games)},
+    )
     logger.info(
         "Games after recommendation attachment",
         extra={"selected_date": date.isoformat(), "games_count_after_recommendation_attachment": len(games)},
@@ -173,13 +184,24 @@ def get_games(
             "Returning games response with schedule fetch failure note",
             extra={"selected_date": date.isoformat(), "note": schedule_fetch_failure_note},
         )
-    return GamesResponse(
+    response = GamesResponse(
         date=date,
         games=games,
         projections_available=projections_available,
         odds_available=odds_available,
         notes=notes,
     )
+    logger.info(
+        "games response return",
+        extra={
+            "selected_date": date.isoformat(),
+            "games_count_in_response": len(response.games),
+            "projections_available": response.projections_available,
+            "odds_available": response.odds_available,
+            "notes_count": len(response.notes),
+        },
+    )
+    return response
 
 
 @router.get("/recommendations/daily", response_model=DailyRecommendationsResponse)

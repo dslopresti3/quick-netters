@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -146,16 +147,36 @@ class AutoGeneratingProjectionProvider(ProjectionProvider):
         eligible_player_pool = _build_eligible_player_pool(
             scheduled_games=scheduled_games,
             roster_repository=self._roster_repository,
+            selected_date=selected_date,
+        )
+        logger.info(
+            "games player first-goal history fetch start",
+            extra={
+                "selected_date": selected_date.isoformat(),
+                "eligible_player_count": len({candidate.player.player_id for candidate in eligible_player_pool}),
+            },
         )
         player_history = self._history_loader(
             selected_date,
             {candidate.player.player_id for candidate in eligible_player_pool},
             self._artifact_path,
         )
+        logger.info(
+            "games player first-goal history fetch end",
+            extra={
+                "selected_date": selected_date.isoformat(),
+                "history_player_count": len(player_history),
+            },
+        )
 
+        logger.info("games projection generation start", extra={"selected_date": selected_date.isoformat()})
         generated = _generate_candidates_from_eligible_player_pool(
             eligible_player_pool=eligible_player_pool,
             player_history=player_history,
+        )
+        logger.info(
+            "games projection generation end",
+            extra={"selected_date": selected_date.isoformat(), "generated_projection_count": len(generated)},
         )
 
         if generated:
@@ -180,11 +201,25 @@ class _EligiblePlayerCandidate:
 def _build_eligible_player_pool(
     scheduled_games: list[GameSummary],
     roster_repository: ActiveRosterSource,
+    selected_date: date,
 ) -> list[_EligiblePlayerCandidate]:
     pool: list[_EligiblePlayerCandidate] = []
     for game in scheduled_games:
         for team_name in (game.away_team, game.home_team):
+            logger.info(
+                "games active roster fetch start",
+                extra={"selected_date": selected_date.isoformat(), "team_name": team_name, "game_id": game.game_id},
+            )
             players = roster_repository.active_players_for_team(team_name)
+            logger.info(
+                "games active roster fetch end",
+                extra={
+                    "selected_date": selected_date.isoformat(),
+                    "team_name": team_name,
+                    "game_id": game.game_id,
+                    "active_roster_count": len(players),
+                },
+            )
             ranked = sorted(
                 players,
                 key=lambda p: (
@@ -359,12 +394,57 @@ def _load_player_first_goal_history_from_artifact(
 def load_player_first_goal_history_from_nhl_api(
     selected_date: date,
     eligible_player_ids: set[str],
-    path: Path,  # noqa: ARG001
+    path: Path,
 ) -> dict[str, PlayerHistoricalProduction]:
-    history: dict[str, PlayerHistoricalProduction] = {}
-    for player_id in eligible_player_ids:
-        history[player_id] = fetch_player_first_goal_history(player_id=player_id, selected_date=selected_date)
-    return history
+    if not eligible_player_ids:
+        return {}
+
+    cached_history = _load_player_first_goal_history_from_artifact(
+        selected_date=selected_date,
+        eligible_player_ids=eligible_player_ids,
+        path=path,
+    )
+    missing_player_ids = sorted(player_id for player_id in eligible_player_ids if player_id not in cached_history)
+
+    max_live_history_requests = max(0, int(os.getenv("NHL_HISTORY_MAX_LIVE_REQUESTS_PER_GAMES", "0")))
+    if max_live_history_requests == 0:
+        if missing_player_ids:
+            logger.warning(
+                "Skipping live NHL history fetches in /games path",
+                extra={
+                    "selected_date": selected_date.isoformat(),
+                    "missing_player_history_count": len(missing_player_ids),
+                    "max_live_history_requests": max_live_history_requests,
+                },
+            )
+        return cached_history
+
+    fetch_budget = min(max_live_history_requests, len(missing_player_ids))
+    for player_id in missing_player_ids[:fetch_budget]:
+        try:
+            cached_history[player_id] = fetch_player_first_goal_history(player_id=player_id, selected_date=selected_date)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Live NHL player history fetch failed; continuing without this player history",
+                extra={
+                    "selected_date": selected_date.isoformat(),
+                    "player_id": player_id,
+                    "error": str(exc),
+                },
+            )
+
+    skipped_due_to_budget = len(missing_player_ids) - fetch_budget
+    if skipped_due_to_budget > 0:
+        logger.warning(
+            "Skipped live NHL history fetches due to request budget",
+            extra={
+                "selected_date": selected_date.isoformat(),
+                "skipped_player_history_count": skipped_due_to_budget,
+                "max_live_history_requests": max_live_history_requests,
+            },
+        )
+
+    return cached_history
 
 
 def _history_value(value: float | None) -> float:
