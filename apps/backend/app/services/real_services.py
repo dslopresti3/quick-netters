@@ -4,7 +4,6 @@ import json
 import logging
 from datetime import date, datetime, timezone
 from time import perf_counter
-from zoneinfo import ZoneInfo
 from typing import Any
 from urllib.error import HTTPError, URLError
 
@@ -151,18 +150,24 @@ def _matches_selected_schedule_window(game: dict[str, Any], selected_date: date)
         return game_date == selected_date
 
     week_date = _parse_date_hint(game.get("_weekDate"))
-    if week_date is not None:
-        return week_date == selected_date
-
     start_time_utc = game.get("startTimeUTC")
-    if not isinstance(start_time_utc, str):
-        return False
+    start_time_date = None
+    if isinstance(start_time_utc, str):
+        try:
+            start_time_date = _parse_utc_datetime(start_time_utc).date()
+        except ValueError:
+            start_time_date = None
 
-    try:
-        start_dt_utc = _parse_utc_datetime(start_time_utc)
-    except ValueError:
+    if week_date is not None:
+        if week_date != selected_date:
+            return False
+        if start_time_date is None:
+            return True
+        return start_time_date == selected_date
+
+    if start_time_date is None:
         return False
-    return start_dt_utc.astimezone(ZoneInfo("America/New_York")).date() == selected_date
+    return start_time_date == selected_date
 
 
 def _extract_game_hint_dates(game: dict[str, Any]) -> tuple[set[date], set[date]]:

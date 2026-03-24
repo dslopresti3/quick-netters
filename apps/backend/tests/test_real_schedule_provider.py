@@ -89,13 +89,33 @@ def test_map_schedule_payload_uses_week_date_when_game_date_missing() -> None:
         ]
     }
 
+    games = _map_schedule_payload(payload, selected_date=date(2026, 3, 24))
+
+    assert games == []
+
+
+def test_map_schedule_payload_uses_week_date_when_game_date_missing_and_start_time_matches_selected_day() -> None:
+    payload = {
+        "gameWeek": [
+            {
+                "date": "2026-03-23",
+                "games": [
+                    {
+                        "id": 2026020100,
+                        "startTimeUTC": "2026-03-23T23:30:00Z",
+                        "gameState": "FUT",
+                        "awayTeam": {"commonName": {"default": "Sharks"}},
+                        "homeTeam": {"commonName": {"default": "Kings"}},
+                    }
+                ],
+            }
+        ]
+    }
+
     games = _map_schedule_payload(payload, selected_date=date(2026, 3, 23))
 
     assert len(games) == 1
-    assert games[0].game_id == "2026020099"
-    assert games[0].away_team == "Sharks"
-    assert games[0].home_team == "Kings"
-    assert games[0].game_time.isoformat() == "2026-03-24T02:30:00+00:00"
+    assert games[0].game_id == "2026020100"
 
 
 def test_map_schedule_payload_excludes_games_when_game_date_is_next_slate_day() -> None:

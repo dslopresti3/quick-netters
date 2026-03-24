@@ -173,34 +173,68 @@ class AutoGeneratingProjectionProvider(ProjectionProvider):
         self._generated_cache_by_date: dict[date, list[PlayerProjectionCandidate]] = {}
 
     def fetch_player_first_goal_projections(self, selected_date: date) -> list[PlayerProjectionCandidate]:
+        scheduled_games = self._schedule_provider.fetch(selected_date)
+        if not scheduled_games:
+            return []
+        valid_game_ids = {game.game_id for game in scheduled_games}
+        valid_teams_by_game_id = {
+            game.game_id: {game.away_team.strip().lower(), game.home_team.strip().lower()}
+            for game in scheduled_games
+        }
+
         cached_generated = self._generated_cache_by_date.get(selected_date)
         if cached_generated is not None:
+            if _rows_match_scheduled_slate(
+                rows=cached_generated,
+                valid_game_ids=valid_game_ids,
+                valid_teams_by_game_id=valid_teams_by_game_id,
+            ) and not _is_stale_projection_snapshot(cached_generated):
+                logger.info(
+                    "games projection cache hit",
+                    extra={
+                        "selected_date": selected_date.isoformat(),
+                        "projection_count": len(cached_generated),
+                        "projection_cache_source": "memory",
+                    },
+                )
+                return [row for row in cached_generated]
             logger.info(
-                "games projection cache hit",
+                "games projection memory cache stale snapshot detected; regenerating",
                 extra={
                     "selected_date": selected_date.isoformat(),
                     "projection_count": len(cached_generated),
                     "projection_cache_source": "memory",
                 },
             )
-            return [row for row in cached_generated]
+            self._generated_cache_by_date.pop(selected_date, None)
 
         cached_artifact_rows = _load_projection_rows_for_date_from_artifact(self._artifact_path, selected_date)
         if cached_artifact_rows:
-            logger.info(
-                "games projection cache hit",
-                extra={
-                    "selected_date": selected_date.isoformat(),
-                    "projection_count": len(cached_artifact_rows),
-                    "projection_cache_source": "artifact",
-                },
-            )
-            self._generated_cache_by_date[selected_date] = [row for row in cached_artifact_rows]
-            return cached_artifact_rows
-
-        scheduled_games = self._schedule_provider.fetch(selected_date)
-        if not scheduled_games:
-            return []
+            if _is_stale_projection_snapshot(cached_artifact_rows) or not _rows_match_scheduled_slate(
+                rows=cached_artifact_rows,
+                valid_game_ids=valid_game_ids,
+                valid_teams_by_game_id=valid_teams_by_game_id,
+            ):
+                logger.info(
+                    "games projection cache stale snapshot detected; regenerating",
+                    extra={
+                        "selected_date": selected_date.isoformat(),
+                        "projection_count": len(cached_artifact_rows),
+                        "projection_cache_source": "artifact",
+                    },
+                )
+                _delete_projection_rows_for_date(self._artifact_path, selected_date)
+            else:
+                logger.info(
+                    "games projection cache hit",
+                    extra={
+                        "selected_date": selected_date.isoformat(),
+                        "projection_count": len(cached_artifact_rows),
+                        "projection_cache_source": "artifact",
+                    },
+                )
+                self._generated_cache_by_date[selected_date] = [row for row in cached_artifact_rows]
+                return cached_artifact_rows
 
         active_rosters_started = perf_counter()
         eligible_player_pool = _build_eligible_player_pool(
@@ -447,6 +481,20 @@ def _upsert_generated_rows(artifact_path: Path, selected_date: date, rows: list[
         retained,
         key=lambda row: (str(row.get("date", "")), str(row.get("game_id", "")), str(row.get("player_id", ""))),
     )
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _delete_projection_rows_for_date(artifact_path: Path, selected_date: date) -> None:
+    payload = _load_artifact(artifact_path)
+    existing = payload.get("projections")
+    if not isinstance(existing, list):
+        return
+    selected_date_iso = selected_date.isoformat()
+    filtered = [row for row in existing if not isinstance(row, dict) or row.get("date") != selected_date_iso]
+    if len(filtered) == len(existing):
+        return
+    payload["projections"] = filtered
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
@@ -699,6 +747,7 @@ def _load_projection_rows_for_date_from_artifact(path: Path, selected_date: date
         team_name_raw = row.get("team_name")
         active_team_name_raw = row.get("active_team_name", team_name_raw)
         probability_raw = row.get("model_probability", row.get("probability"))
+        position_code = _normalize_position_code(row.get("position_code"))
         if not isinstance(game_id_raw, str) or not game_id_raw.strip():
             continue
         if not isinstance(player_name_raw, str) or not player_name_raw.strip():
@@ -708,6 +757,10 @@ def _load_projection_rows_for_date_from_artifact(path: Path, selected_date: date
         if not isinstance(active_team_name_raw, str) or not active_team_name_raw.strip():
             continue
         if not isinstance(probability_raw, (int, float)):
+            continue
+        if position_code is None:
+            continue
+        if _is_goalie(position_code):
             continue
         probability = float(probability_raw)
         if not (0 < probability < 1):
@@ -729,11 +782,52 @@ def _load_projection_rows_for_date_from_artifact(path: Path, selected_date: date
                 roster_eligibility=PlayerRosterEligibility(
                     active_team_name=active_team_name_raw.strip(),
                     is_active_roster=bool(row.get("is_active_roster", True)),
-                    position_code=_normalize_position_code(row.get("position_code")),
+                    position_code=position_code,
                 ),
             )
         )
     return rows
+
+
+def _rows_match_scheduled_slate(
+    rows: list[PlayerProjectionCandidate],
+    valid_game_ids: set[str],
+    valid_teams_by_game_id: dict[str, set[str]],
+) -> bool:
+    if not rows:
+        return False
+    for row in rows:
+        game_id = row.game_id.strip()
+        if game_id not in valid_game_ids:
+            return False
+        valid_teams = valid_teams_by_game_id.get(game_id, set())
+        if row.projected_team_name.strip().lower() not in valid_teams:
+            return False
+        if row.roster_eligibility.active_team_name.strip().lower() not in valid_teams:
+            return False
+    return True
+
+
+def _is_stale_projection_snapshot(rows: list[PlayerProjectionCandidate]) -> bool:
+    if not rows:
+        return False
+    includes_goalie = any(_is_goalie(row.roster_eligibility.position_code) for row in rows)
+    unique_probabilities = {round(row.model_probability, 4) for row in rows}
+    has_flat_probabilities = len(unique_probabilities) <= 2 and len(rows) >= 6
+    has_near_flat_probabilities = len(unique_probabilities) <= 3
+    has_missing_position_codes = any(row.roster_eligibility.position_code is None for row in rows)
+    missing_enriched_history = any(
+        row.historical_production.season_total_goals is None
+        and row.historical_production.season_total_shots is None
+        and row.historical_production.season_first_period_goals is None
+        for row in rows
+    )
+    return (
+        includes_goalie
+        or has_missing_position_codes
+        or has_flat_probabilities
+        or (has_near_flat_probabilities and missing_enriched_history)
+    )
 
 
 def _slug(value: str) -> str:
