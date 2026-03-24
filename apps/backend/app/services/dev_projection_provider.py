@@ -41,6 +41,7 @@ class ActiveRosterPlayer:
     historical_season_total_goals: float | None = None
     historical_season_total_shots: float | None = None
     historical_season_first_period_goals: float | None = None
+    historical_season_first_period_shots: float | None = None
 
 
 class ActiveRosterRepository:
@@ -91,6 +92,7 @@ class ActiveRosterRepository:
                 historical_season_total_goals=_as_float(raw.get("historical_season_total_goals")),
                 historical_season_total_shots=_as_float(raw.get("historical_season_total_shots")),
                 historical_season_first_period_goals=_as_float(raw.get("historical_season_first_period_goals")),
+                historical_season_first_period_shots=_as_float(raw.get("historical_season_first_period_shots")),
             )
             loaded.setdefault(active_team_name.lower(), []).append(player)
 
@@ -134,6 +136,8 @@ class NhlApiActiveRosterRepository:
 @dataclass(frozen=True)
 class _ProjectionTemplate:
     team_goals_per_game_weight: float
+    team_scores_first_rate_weight: float
+    opponent_allows_first_rate_weight: float
     opponent_goals_allowed_per_game_weight: float
     home_ice_weight: float
     team_recent_form_weight: float
@@ -141,21 +145,29 @@ class _ProjectionTemplate:
     player_first_goal_weight: float
     player_total_goal_weight: float
     player_first_period_goal_weight: float
+    player_first_period_shot_weight: float
     player_shots_per_game_weight: float
     player_recent_form_weight: float
+    player_recent_5_form_weight: float
+    player_recent_10_form_weight: float
 
 
 _DEFAULT_TEMPLATE = _ProjectionTemplate(
-    team_goals_per_game_weight=0.33,
-    opponent_goals_allowed_per_game_weight=0.23,
+    team_goals_per_game_weight=0.19,
+    team_scores_first_rate_weight=0.26,
+    opponent_allows_first_rate_weight=0.18,
+    opponent_goals_allowed_per_game_weight=0.13,
     home_ice_weight=0.08,
-    team_recent_form_weight=0.20,
+    team_recent_form_weight=0.10,
     team_first_period_weight=0.16,
-    player_first_goal_weight=0.45,
-    player_total_goal_weight=0.20,
-    player_first_period_goal_weight=0.13,
-    player_shots_per_game_weight=0.10,
-    player_recent_form_weight=0.12,
+    player_first_goal_weight=0.34,
+    player_total_goal_weight=0.14,
+    player_first_period_goal_weight=0.11,
+    player_first_period_shot_weight=0.08,
+    player_shots_per_game_weight=0.08,
+    player_recent_form_weight=0.10,
+    player_recent_5_form_weight=0.08,
+    player_recent_10_form_weight=0.07,
 )
 _GOALIE_POSITION_CODES = {"G", "GOALIE", "GK"}
 _FORWARD_POSITION_CODES = {"C", "LW", "RW", "F"}
@@ -325,8 +337,12 @@ class _PlayerModelFeatures:
     first_goals_per_game: float
     goals_per_game: float
     first_period_goals_per_game: float
+    first_period_shots_per_game: float
     shots_per_game: float
     recent_form: float
+    recent_5_form: float
+    recent_10_form: float
+    offensive_tier_multiplier: float
 
 
 def _build_eligible_player_pool(
@@ -402,7 +418,7 @@ def _generate_candidates_from_eligible_player_pool(
         game_team_names.setdefault(candidate.game_id, set()).add(candidate.projected_team_name)
 
     team_strength_by_game_team: dict[tuple[str, str], float] = {}
-    team_feature_by_game_team: dict[tuple[str, str], tuple[float, float, float, float, float]] = {}
+    team_feature_by_game_team: dict[tuple[str, str], tuple[float, float, float, float, float, float, float]] = {}
     for game_id, team_names in game_team_names.items():
         for team_name in team_names:
             own_key = (game_id, team_name)
@@ -410,22 +426,28 @@ def _generate_candidates_from_eligible_player_pool(
             opponent_candidates = team_candidates.get((game_id, opponent_team_name), []) if opponent_team_name else []
             own_candidates = team_candidates.get(own_key, [])
             team_goals_per_game = _team_goals_per_game(own_candidates, player_history)
+            team_scores_first_rate = _team_scores_first_rate(own_candidates, player_history)
             opponent_goals_allowed_per_game = _opponent_goals_allowed_per_game_proxy(opponent_candidates, player_history)
+            opponent_allows_first_rate = _opponent_allows_first_rate_proxy(opponent_candidates, player_history)
             is_home = 1.0 if any(c.is_home_team for c in own_candidates) else 0.0
-            team_recent_form = _team_recent_form(own_candidates, player_history)
+            team_recent_form = _team_recent_scoring_form(own_candidates, player_history)
             team_first_period_scoring = _team_first_period_scoring(own_candidates, player_history)
             opponent_first_period_allow = _opponent_first_period_allow_proxy(opponent_candidates, player_history)
             first_period_signal = 0.5 * team_first_period_scoring + 0.5 * opponent_first_period_allow
 
             team_feature_by_game_team[own_key] = (
                 team_goals_per_game,
+                team_scores_first_rate,
                 opponent_goals_allowed_per_game,
+                opponent_allows_first_rate,
                 is_home,
                 team_recent_form,
                 first_period_signal,
             )
             team_strength_by_game_team[own_key] = max(
                 template.team_goals_per_game_weight * team_goals_per_game
+                + template.team_scores_first_rate_weight * team_scores_first_rate
+                + template.opponent_allows_first_rate_weight * opponent_allows_first_rate
                 + template.opponent_goals_allowed_per_game_weight * opponent_goals_allowed_per_game
                 + template.home_ice_weight * is_home
                 + template.team_recent_form_weight * team_recent_form
@@ -451,6 +473,7 @@ def _generate_candidates_from_eligible_player_pool(
                     season_total_goals=candidate.player.historical_season_total_goals,
                     season_total_shots=candidate.player.historical_season_total_shots,
                     season_first_period_goals=candidate.player.historical_season_first_period_goals,
+                    season_first_period_shots=candidate.player.historical_season_first_period_shots,
                 ),
             )
             player_features = _player_model_features(player_historical)
@@ -471,6 +494,7 @@ def _generate_candidates_from_eligible_player_pool(
                         season_total_goals=candidate.player.historical_season_total_goals,
                         season_total_shots=candidate.player.historical_season_total_shots,
                         season_first_period_goals=candidate.player.historical_season_first_period_goals,
+                        season_first_period_shots=candidate.player.historical_season_first_period_shots,
                     )
                 )
                 fallback_rows.append(
@@ -482,6 +506,7 @@ def _generate_candidates_from_eligible_player_pool(
                             season_total_goals=candidate.player.historical_season_total_goals,
                             season_total_shots=candidate.player.historical_season_total_shots,
                             season_first_period_goals=candidate.player.historical_season_first_period_goals,
+                            season_first_period_shots=candidate.player.historical_season_first_period_shots,
                         ),
                         float(fallback_size - idx),
                         fallback_features,
@@ -500,7 +525,7 @@ def _generate_candidates_from_eligible_player_pool(
         team_probability = team_probability_by_game_team.get(rank_key, 0.5)
         scored_sorted = sorted(scored_players, key=lambda row: (-row[2], row[0].player.player_name.lower()))
         debug_rows: list[dict[str, Any]] = []
-        team_feature_values = team_feature_by_game_team.get(rank_key, (0.0, 0.0, 0.0, 0.0, 0.0))
+        team_feature_values = team_feature_by_game_team.get(rank_key, (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
         for candidate, player_historical, player_score, player_features in scored_sorted:
             player_share_within_team = player_score / max(total_player_score, 1e-9)
             probability = team_probability * player_share_within_team
@@ -510,16 +535,23 @@ def _generate_candidates_from_eligible_player_pool(
                     "position": candidate.player.position_code,
                     "team_features": {
                         "team_goals_per_game": round(team_feature_values[0], 4),
-                        "opponent_goals_allowed_per_game_proxy": round(team_feature_values[1], 4),
-                        "is_home": bool(team_feature_values[2]),
-                        "team_recent_form": round(team_feature_values[3], 4),
-                        "first_period_signal": round(team_feature_values[4], 4),
+                        "team_scores_first_rate": round(team_feature_values[1], 4),
+                        "opponent_goals_allowed_per_game_proxy": round(team_feature_values[2], 4),
+                        "opponent_allows_first_rate_proxy": round(team_feature_values[3], 4),
+                        "is_home": bool(team_feature_values[4]),
+                        "team_recent_scoring_form": round(team_feature_values[5], 4),
+                        "first_period_signal": round(team_feature_values[6], 4),
                     },
                     "season_first_goals": _history_value(player_historical.season_first_goals),
                     "season_total_goals": _history_value(player_historical.season_total_goals),
                     "season_first_period_goals": _history_value(player_historical.season_first_period_goals),
+                    "season_first_period_shots": _history_value(player_historical.season_first_period_shots),
                     "shots_per_game": round(player_features.shots_per_game, 4),
+                    "first_period_shots_per_game": round(player_features.first_period_shots_per_game, 4),
                     "player_recent_form": round(player_features.recent_form, 4),
+                    "player_recent_5_form": round(player_features.recent_5_form, 4),
+                    "player_recent_10_form": round(player_features.recent_10_form, 4),
+                    "offensive_tier_multiplier": round(player_features.offensive_tier_multiplier, 4),
                     "player_score_before_normalization": round(player_score, 6),
                     "team_probability": round(team_probability, 6),
                     "player_share_given_team_first": round(player_share_within_team, 6),
@@ -635,6 +667,17 @@ def _as_serializable_rows(selected_date: date, rows: list[PlayerProjectionCandid
                 "historical_season_total_goals": row.historical_production.season_total_goals,
                 "historical_season_total_shots": row.historical_production.season_total_shots,
                 "historical_season_first_period_goals": row.historical_production.season_first_period_goals,
+                "historical_season_first_period_shots": row.historical_production.season_first_period_shots,
+                "historical_recent_5_first_goals": row.historical_production.recent_5_first_goals,
+                "historical_recent_10_first_goals": row.historical_production.recent_10_first_goals,
+                "historical_recent_5_total_goals": row.historical_production.recent_5_total_goals,
+                "historical_recent_10_total_goals": row.historical_production.recent_10_total_goals,
+                "historical_recent_5_total_shots": row.historical_production.recent_5_total_shots,
+                "historical_recent_10_total_shots": row.historical_production.recent_10_total_shots,
+                "historical_recent_5_first_period_goals": row.historical_production.recent_5_first_period_goals,
+                "historical_recent_10_first_period_goals": row.historical_production.recent_10_first_period_goals,
+                "historical_recent_5_first_period_shots": row.historical_production.recent_5_first_period_shots,
+                "historical_recent_10_first_period_shots": row.historical_production.recent_10_first_period_shots,
                 "probability": row.model_probability,
                 "model_probability": row.model_probability,
             }
@@ -675,7 +718,18 @@ def _load_player_first_goal_history_from_artifact(
         total_goals = _as_float(row.get("historical_season_total_goals"))
         total_shots = _as_float(row.get("historical_season_total_shots"))
         first_period_goals = _as_float(row.get("historical_season_first_period_goals"))
-        if first_goals is None and games_played is None and total_goals is None and total_shots is None:
+        first_period_shots = _as_float(row.get("historical_season_first_period_shots"))
+        recent_5_first_goals = _as_float(row.get("historical_recent_5_first_goals"))
+        recent_10_first_goals = _as_float(row.get("historical_recent_10_first_goals"))
+        recent_5_total_goals = _as_float(row.get("historical_recent_5_total_goals"))
+        recent_10_total_goals = _as_float(row.get("historical_recent_10_total_goals"))
+        recent_5_total_shots = _as_float(row.get("historical_recent_5_total_shots"))
+        recent_10_total_shots = _as_float(row.get("historical_recent_10_total_shots"))
+        recent_5_first_period_goals = _as_float(row.get("historical_recent_5_first_period_goals"))
+        recent_10_first_period_goals = _as_float(row.get("historical_recent_10_first_period_goals"))
+        recent_5_first_period_shots = _as_float(row.get("historical_recent_5_first_period_shots"))
+        recent_10_first_period_shots = _as_float(row.get("historical_recent_10_first_period_shots"))
+        if first_goals is None and games_played is None and total_goals is None and total_shots is None and first_period_goals is None:
             continue
         current = history.get(player_id)
         if current is None:
@@ -685,6 +739,17 @@ def _load_player_first_goal_history_from_artifact(
                 season_total_goals=total_goals,
                 season_total_shots=total_shots,
                 season_first_period_goals=first_period_goals,
+                season_first_period_shots=first_period_shots,
+                recent_5_first_goals=recent_5_first_goals,
+                recent_10_first_goals=recent_10_first_goals,
+                recent_5_total_goals=recent_5_total_goals,
+                recent_10_total_goals=recent_10_total_goals,
+                recent_5_total_shots=recent_5_total_shots,
+                recent_10_total_shots=recent_10_total_shots,
+                recent_5_first_period_goals=recent_5_first_period_goals,
+                recent_10_first_period_goals=recent_10_first_period_goals,
+                recent_5_first_period_shots=recent_5_first_period_shots,
+                recent_10_first_period_shots=recent_10_first_period_shots,
             )
             continue
 
@@ -694,6 +759,17 @@ def _load_player_first_goal_history_from_artifact(
             season_total_goals=max(_history_value(current.season_total_goals), _history_value(total_goals)),
             season_total_shots=max(_history_value(current.season_total_shots), _history_value(total_shots)),
             season_first_period_goals=max(_history_value(current.season_first_period_goals), _history_value(first_period_goals)),
+            season_first_period_shots=max(_history_value(current.season_first_period_shots), _history_value(first_period_shots)),
+            recent_5_first_goals=max(_history_value(current.recent_5_first_goals), _history_value(recent_5_first_goals)),
+            recent_10_first_goals=max(_history_value(current.recent_10_first_goals), _history_value(recent_10_first_goals)),
+            recent_5_total_goals=max(_history_value(current.recent_5_total_goals), _history_value(recent_5_total_goals)),
+            recent_10_total_goals=max(_history_value(current.recent_10_total_goals), _history_value(recent_10_total_goals)),
+            recent_5_total_shots=max(_history_value(current.recent_5_total_shots), _history_value(recent_5_total_shots)),
+            recent_10_total_shots=max(_history_value(current.recent_10_total_shots), _history_value(recent_10_total_shots)),
+            recent_5_first_period_goals=max(_history_value(current.recent_5_first_period_goals), _history_value(recent_5_first_period_goals)),
+            recent_10_first_period_goals=max(_history_value(current.recent_10_first_period_goals), _history_value(recent_10_first_period_goals)),
+            recent_5_first_period_shots=max(_history_value(current.recent_5_first_period_shots), _history_value(recent_5_first_period_shots)),
+            recent_10_first_period_shots=max(_history_value(current.recent_10_first_period_shots), _history_value(recent_10_first_period_shots)),
         )
     return history
 
@@ -793,28 +869,70 @@ def _player_model_features(player_historical: PlayerHistoricalProduction) -> _Pl
     first_goals_per_game = _history_value(player_historical.season_first_goals) / games_played
     goals_per_game = _history_value(player_historical.season_total_goals) / games_played
     first_period_goals_per_game = _history_value(player_historical.season_first_period_goals) / games_played
+    first_period_shots_per_game = _history_value(player_historical.season_first_period_shots) / games_played
     shots_per_game = _history_value(player_historical.season_total_shots) / games_played
     recent_form = 0.65 * first_goals_per_game + 0.35 * goals_per_game
+    recent_5_games = min(5.0, games_played)
+    recent_10_games = min(10.0, games_played)
+    recent_5_first_goals_per_game = _history_value(player_historical.recent_5_first_goals) / max(recent_5_games, 1.0)
+    recent_10_first_goals_per_game = _history_value(player_historical.recent_10_first_goals) / max(recent_10_games, 1.0)
+    recent_5_goals_per_game = _history_value(player_historical.recent_5_total_goals) / max(recent_5_games, 1.0)
+    recent_10_goals_per_game = _history_value(player_historical.recent_10_total_goals) / max(recent_10_games, 1.0)
+    recent_5_shots_per_game = _history_value(player_historical.recent_5_total_shots) / max(recent_5_games, 1.0)
+    recent_10_shots_per_game = _history_value(player_historical.recent_10_total_shots) / max(recent_10_games, 1.0)
+    recent_5_first_period_goals_per_game = _history_value(player_historical.recent_5_first_period_goals) / max(recent_5_games, 1.0)
+    recent_10_first_period_goals_per_game = _history_value(player_historical.recent_10_first_period_goals) / max(recent_10_games, 1.0)
+    recent_5_first_period_shots_per_game = _history_value(player_historical.recent_5_first_period_shots) / max(recent_5_games, 1.0)
+    recent_10_first_period_shots_per_game = _history_value(player_historical.recent_10_first_period_shots) / max(recent_10_games, 1.0)
+    recent_5_form = (
+        0.42 * recent_5_first_goals_per_game
+        + 0.28 * recent_5_goals_per_game
+        + 0.18 * recent_5_shots_per_game
+        + 0.07 * recent_5_first_period_goals_per_game
+        + 0.05 * recent_5_first_period_shots_per_game
+    )
+    recent_10_form = (
+        0.45 * recent_10_first_goals_per_game
+        + 0.25 * recent_10_goals_per_game
+        + 0.20 * recent_10_shots_per_game
+        + 0.06 * recent_10_first_period_goals_per_game
+        + 0.04 * recent_10_first_period_shots_per_game
+    )
+    offensive_index = (
+        2.2 * first_goals_per_game
+        + 1.0 * goals_per_game
+        + 0.45 * shots_per_game
+        + 0.35 * first_period_goals_per_game
+        + 0.25 * first_period_shots_per_game
+        + 0.8 * recent_5_form
+        + 0.6 * recent_10_form
+    )
+    offensive_tier_multiplier = min(1.85, max(0.45, 0.55 + (1.05 * offensive_index)))
     return _PlayerModelFeatures(
         first_goals_per_game=first_goals_per_game,
         goals_per_game=goals_per_game,
         first_period_goals_per_game=first_period_goals_per_game,
+        first_period_shots_per_game=first_period_shots_per_game,
         shots_per_game=shots_per_game,
         recent_form=recent_form,
+        recent_5_form=recent_5_form,
+        recent_10_form=recent_10_form,
+        offensive_tier_multiplier=offensive_tier_multiplier,
     )
 
 
 def _player_first_goal_score(player_features: _PlayerModelFeatures, template: _ProjectionTemplate) -> float:
-    return max(
-        (
-            template.player_first_goal_weight * player_features.first_goals_per_game
-            + template.player_total_goal_weight * player_features.goals_per_game
-            + template.player_first_period_goal_weight * player_features.first_period_goals_per_game
-            + template.player_shots_per_game_weight * player_features.shots_per_game
-            + template.player_recent_form_weight * player_features.recent_form
-        ),
-        0.0,
+    baseline = (
+        template.player_first_goal_weight * player_features.first_goals_per_game
+        + template.player_total_goal_weight * player_features.goals_per_game
+        + template.player_first_period_goal_weight * player_features.first_period_goals_per_game
+        + template.player_first_period_shot_weight * player_features.first_period_shots_per_game
+        + template.player_shots_per_game_weight * player_features.shots_per_game
+        + template.player_recent_form_weight * player_features.recent_form
+        + template.player_recent_5_form_weight * player_features.recent_5_form
+        + template.player_recent_10_form_weight * player_features.recent_10_form
     )
+    return max(baseline * player_features.offensive_tier_multiplier, 0.0)
 
 
 def _team_goals_per_game(
@@ -833,7 +951,7 @@ def _team_goals_per_game(
     return sum(goals_per_game_values)
 
 
-def _team_recent_form(
+def _team_recent_scoring_form(
     candidates: list[_EligiblePlayerCandidate],
     player_history: dict[str, PlayerHistoricalProduction],
 ) -> float:
@@ -849,8 +967,30 @@ def _team_recent_form(
                 season_games_played=candidate.player.historical_season_games_played,
             ),
         )
-        recent_form_values.append(_player_model_features(historical).recent_form)
+        features = _player_model_features(historical)
+        recent_form_values.append((0.35 * features.recent_form) + (0.45 * features.recent_5_form) + (0.20 * features.recent_10_form))
     return sum(recent_form_values)
+
+
+def _team_scores_first_rate(
+    candidates: list[_EligiblePlayerCandidate],
+    player_history: dict[str, PlayerHistoricalProduction],
+) -> float:
+    if not candidates:
+        return 0.0
+    first_goal_rate = sum(
+        _player_model_features(
+            player_history.get(
+                candidate.player.player_id,
+                PlayerHistoricalProduction(
+                    season_first_goals=candidate.player.historical_season_first_goals,
+                    season_games_played=candidate.player.historical_season_games_played,
+                ),
+            )
+        ).first_goals_per_game
+        for candidate in candidates
+    )
+    return min(max(first_goal_rate, 0.0), 1.0)
 
 
 def _team_first_period_scoring(
@@ -880,6 +1020,16 @@ def _opponent_goals_allowed_per_game_proxy(
         return 0.0
     opponent_offense = _team_goals_per_game(candidates, player_history)
     return 0.5 + (0.5 * min(opponent_offense, 6.0) / 6.0)
+
+
+def _opponent_allows_first_rate_proxy(
+    candidates: list[_EligiblePlayerCandidate],
+    player_history: dict[str, PlayerHistoricalProduction],
+) -> float:
+    if not candidates:
+        return 0.5
+    opponent_scores_first = _team_scores_first_rate(candidates, player_history)
+    return min(max(1.0 - opponent_scores_first, 0.0), 1.0)
 
 
 def _opponent_first_period_allow_proxy(
@@ -949,6 +1099,17 @@ def _load_projection_rows_for_date_from_artifact(path: Path, selected_date: date
                     season_total_goals=_as_float(row.get("historical_season_total_goals")),
                     season_total_shots=_as_float(row.get("historical_season_total_shots")),
                     season_first_period_goals=_as_float(row.get("historical_season_first_period_goals")),
+                    season_first_period_shots=_as_float(row.get("historical_season_first_period_shots")),
+                    recent_5_first_goals=_as_float(row.get("historical_recent_5_first_goals")),
+                    recent_10_first_goals=_as_float(row.get("historical_recent_10_first_goals")),
+                    recent_5_total_goals=_as_float(row.get("historical_recent_5_total_goals")),
+                    recent_10_total_goals=_as_float(row.get("historical_recent_10_total_goals")),
+                    recent_5_total_shots=_as_float(row.get("historical_recent_5_total_shots")),
+                    recent_10_total_shots=_as_float(row.get("historical_recent_10_total_shots")),
+                    recent_5_first_period_goals=_as_float(row.get("historical_recent_5_first_period_goals")),
+                    recent_10_first_period_goals=_as_float(row.get("historical_recent_10_first_period_goals")),
+                    recent_5_first_period_shots=_as_float(row.get("historical_recent_5_first_period_shots")),
+                    recent_10_first_period_shots=_as_float(row.get("historical_recent_10_first_period_shots")),
                 ),
                 roster_eligibility=PlayerRosterEligibility(
                     active_team_name=active_team_name_raw.strip(),
@@ -1000,6 +1161,8 @@ def _is_stale_projection_snapshot(rows: list[PlayerProjectionCandidate]) -> bool
         row.historical_production.season_total_goals is None
         and row.historical_production.season_total_shots is None
         and row.historical_production.season_first_period_goals is None
+        and row.historical_production.recent_5_first_goals is None
+        and row.historical_production.recent_10_first_goals is None
         for row in rows
     )
     return (

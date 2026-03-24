@@ -112,11 +112,26 @@ def fetch_player_first_goal_history(player_id: str, selected_date: date) -> Play
     total_goals = 0.0
     total_shots = 0.0
     first_period_goals = 0.0
+    first_period_shots = 0.0
     for row in game_log_rows:
         first_goals += _first_goal_value(row)
         total_goals += _numeric_value(row.get("goals"))
         total_shots += _numeric_value(row.get("shots"))
         first_period_goals += _numeric_value(row.get("firstPeriodGoals"))
+        first_period_shots += _first_period_shots_value(row)
+
+    recent_5_rows = game_log_rows[:5]
+    recent_10_rows = game_log_rows[:10]
+    recent_5_first_goals = sum(_first_goal_value(row) for row in recent_5_rows)
+    recent_10_first_goals = sum(_first_goal_value(row) for row in recent_10_rows)
+    recent_5_total_goals = sum(_numeric_value(row.get("goals")) for row in recent_5_rows)
+    recent_10_total_goals = sum(_numeric_value(row.get("goals")) for row in recent_10_rows)
+    recent_5_total_shots = sum(_numeric_value(row.get("shots")) for row in recent_5_rows)
+    recent_10_total_shots = sum(_numeric_value(row.get("shots")) for row in recent_10_rows)
+    recent_5_first_period_goals = sum(_numeric_value(row.get("firstPeriodGoals")) for row in recent_5_rows)
+    recent_10_first_period_goals = sum(_numeric_value(row.get("firstPeriodGoals")) for row in recent_10_rows)
+    recent_5_first_period_shots = sum(_first_period_shots_value(row) for row in recent_5_rows)
+    recent_10_first_period_shots = sum(_first_period_shots_value(row) for row in recent_10_rows)
 
     if season_games_played is None:
         return PlayerHistoricalProduction()
@@ -126,6 +141,17 @@ def fetch_player_first_goal_history(player_id: str, selected_date: date) -> Play
         season_total_goals=total_goals,
         season_total_shots=total_shots,
         season_first_period_goals=first_period_goals,
+        season_first_period_shots=first_period_shots,
+        recent_5_first_goals=recent_5_first_goals,
+        recent_10_first_goals=recent_10_first_goals,
+        recent_5_total_goals=recent_5_total_goals,
+        recent_10_total_goals=recent_10_total_goals,
+        recent_5_total_shots=recent_5_total_shots,
+        recent_10_total_shots=recent_10_total_shots,
+        recent_5_first_period_goals=recent_5_first_period_goals,
+        recent_10_first_period_goals=recent_10_first_period_goals,
+        recent_5_first_period_shots=recent_5_first_period_shots,
+        recent_10_first_period_shots=recent_10_first_period_shots,
     )
 
 
@@ -207,4 +233,11 @@ def _numeric_value(value: Any) -> float:
         return 1.0 if value else 0.0
     if isinstance(value, (int, float)):
         return float(value)
+    return 0.0
+
+
+def _first_period_shots_value(row: dict[str, Any]) -> float:
+    for key in ("firstPeriodShots", "shotsFirstPeriod", "period1Shots", "shotsInFirstPeriod"):
+        if key in row:
+            return _numeric_value(row.get(key))
     return 0.0

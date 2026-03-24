@@ -13,6 +13,17 @@ class PlayerHistoricalProduction:
     season_total_goals: float | None = None
     season_total_shots: float | None = None
     season_first_period_goals: float | None = None
+    season_first_period_shots: float | None = None
+    recent_5_first_goals: float | None = None
+    recent_10_first_goals: float | None = None
+    recent_5_total_goals: float | None = None
+    recent_10_total_goals: float | None = None
+    recent_5_total_shots: float | None = None
+    recent_10_total_shots: float | None = None
+    recent_5_first_period_goals: float | None = None
+    recent_10_first_period_goals: float | None = None
+    recent_5_first_period_shots: float | None = None
+    recent_10_first_period_shots: float | None = None
 
 
 @dataclass(frozen=True)
