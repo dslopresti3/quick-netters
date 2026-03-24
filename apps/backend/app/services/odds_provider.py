@@ -7,6 +7,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 from app.services.interfaces import OddsProvider
 from app.services.odds import NormalizedPlayerOdds, STALE_ODDS_THRESHOLD, normalize_snapshot_timestamp
@@ -19,6 +20,7 @@ class TheOddsApiClient:
     event_odds_url_template = "https://api.the-odds-api.com/v4/sports/icehockey_nhl/events/{event_id}/odds"
     provider_name = "the-odds-api"
     first_goal_market_key = "player_goal_scorer_first"
+    slate_timezone = ZoneInfo("America/New_York")
 
     def __init__(self, api_key: str | None = None, timeout_seconds: int = 10) -> None:
         self._api_key = api_key or os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY")
@@ -28,8 +30,7 @@ class TheOddsApiClient:
         if not self._api_key:
             return []
 
-        window_start = datetime.combine(selected_date, datetime.min.time(), tzinfo=timezone.utc)
-        window_end = window_start + timedelta(days=1)
+        window_start, window_end = _selected_slate_utc_window(selected_date, self.slate_timezone)
         event_query = urlencode(
             {
                 "apiKey": self._api_key,
@@ -278,3 +279,9 @@ def _parse_american_odds(raw_price: Any) -> int | None:
     if integer_price == 0:
         return None
     return integer_price
+
+
+def _selected_slate_utc_window(selected_date: date, slate_timezone: ZoneInfo) -> tuple[datetime, datetime]:
+    local_start = datetime.combine(selected_date, datetime.min.time(), tzinfo=slate_timezone)
+    local_end = local_start + timedelta(days=1)
+    return local_start.astimezone(timezone.utc), local_end.astimezone(timezone.utc)
