@@ -2,8 +2,8 @@ import json
 from datetime import date, datetime, timezone
 
 from app.api.schemas import GameSummary
-from app.services.dev_projection_provider import ActiveRosterRepository, AutoGeneratingProjectionProvider
-from app.services.interfaces import ScheduleProvider
+from app.services.dev_projection_provider import ActiveRosterRepository, AutoGeneratingProjectionProvider, NhlApiActiveRosterRepository
+from app.services.interfaces import PlayerHistoricalProduction, ScheduleProvider
 
 
 class _StaticScheduleProvider(ScheduleProvider):
@@ -510,3 +510,50 @@ def test_history_load_is_filtered_to_active_roster_eligible_player_ids(tmp_path)
 
     assert rows
     assert seen_ids == {"8479323", "8477956"}
+
+
+def test_real_mode_common_team_names_generate_rows_with_nhl_api_rosters(tmp_path, monkeypatch) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(artifact, [])
+    selected_date = date(2026, 3, 24)
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026032401",
+                    game_time=datetime(2026, 3, 24, 23, 0, tzinfo=timezone.utc),
+                    away_team="Rangers",
+                    home_team="Bruins",
+                )
+            ]
+        }
+    )
+
+    def _fake_roster(team_abbrev: str):
+        if team_abbrev == "NYR":
+            return [
+                type("P", (), {"player_id": "8479323", "player_name": "Artemi Panarin", "active_team_name": "NYR"})(),
+            ]
+        if team_abbrev == "BOS":
+            return [
+                type("P", (), {"player_id": "8477956", "player_name": "David Pastrnak", "active_team_name": "BOS"})(),
+            ]
+        return []
+
+    monkeypatch.setattr("app.services.dev_projection_provider.fetch_team_roster_current", _fake_roster)
+
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=NhlApiActiveRosterRepository(),
+        history_loader=lambda _date, eligible_ids, _path: {
+            player_id: PlayerHistoricalProduction(season_first_goals=3.0, season_games_played=60.0)
+            for player_id in eligible_ids
+        },
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+
+    assert {row.player_name for row in rows} == {"Artemi Panarin", "David Pastrnak"}
+    assert all(not row.nhl_player_id.startswith("dev-") for row in rows)
+
