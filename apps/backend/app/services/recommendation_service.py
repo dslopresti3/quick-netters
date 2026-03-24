@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 import logging
 import os
+from zoneinfo import ZoneInfo
 
 from app.api.schemas import GameSummary, Recommendation, TeamProjectionLeader
 from app.services.identity import name_aliases, normalize_name, normalize_team_token, team_alias_tokens
@@ -26,6 +27,7 @@ from app.services.odds import (
 )
 
 logger = logging.getLogger(__name__)
+DEFAULT_EVENT_MATCH_TIMEZONE = "America/New_York"
 
 
 class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
@@ -59,7 +61,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
             return False
         snapshots = self._odds_rows_for_date(selected_date)
         mapped_rows = self._map_odds_rows(selected_date, scheduled_games, projections, snapshots)
-        return any(row.market_odds_american != 0 and not is_stale(row.snapshot_at) for row in mapped_rows)
+        return any(_is_valid_matched_odds_row(row) for row in mapped_rows)
 
     def attach_top_projected_scorers(self, selected_date: date, games: list[GameSummary]) -> list[GameSummary]:
         top_by_game_team, _ = self._build_top_projection_lookup(selected_date, games)
@@ -182,7 +184,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
             game = games_by_id.get(game_id)
             odds_snapshot = _latest_snapshot_for_player(odds_snapshots, game_id, player_id)
 
-            if game is None or odds_snapshot is None or is_stale(odds_snapshot.snapshot_at):
+            if game is None or odds_snapshot is None or not _is_valid_matched_odds_row(odds_snapshot):
                 continue
 
             implied_probability = american_to_implied_probability(odds_snapshot.market_odds_american)
@@ -339,6 +341,7 @@ def _match_event_to_game(
             matched_at=matched_at,
         )
 
+    event_match_timezone = os.getenv("ODDS_EVENT_MATCH_TIMEZONE", DEFAULT_EVENT_MATCH_TIMEZONE)
     candidates: list[tuple[int, float, GameSummary]] = []
     for game in scheduled_games:
         away_tokens = team_alias_tokens(game.away_team)
@@ -347,7 +350,11 @@ def _match_event_to_game(
         home_match = home_normalized in home_tokens
         if not away_match or not home_match:
             continue
-        time_delta = abs(int((game.game_time - row.provider_start_time).total_seconds()))
+        time_delta = _event_start_delta_seconds(
+            provider_start_time=row.provider_start_time,
+            canonical_start_time=game.game_time,
+            local_timezone_name=event_match_timezone,
+        )
         if time_delta > tolerance_seconds:
             continue
         confidence = max(0.0, 1.0 - (time_delta / max(tolerance_seconds, 1)))
@@ -486,3 +493,31 @@ def _confidence_tag(ev: float) -> str:
     if ev >= 0.03:
         return "medium"
     return "watch"
+
+
+def _event_start_delta_seconds(provider_start_time: datetime, canonical_start_time: datetime, local_timezone_name: str) -> int:
+    """Best-event-time delta in seconds using UTC and configured local timezone clocks."""
+    utc_delta = abs(int((canonical_start_time - provider_start_time).total_seconds()))
+    try:
+        local_zone = ZoneInfo(local_timezone_name)
+    except Exception:
+        return utc_delta
+
+    provider_local = provider_start_time.astimezone(local_zone)
+    canonical_local = canonical_start_time.astimezone(local_zone)
+    local_delta = abs(int((canonical_local - provider_local).total_seconds()))
+    return min(utc_delta, local_delta)
+
+
+def _is_valid_matched_odds_row(row: NormalizedPlayerOdds) -> bool:
+    if row.market_odds_american == 0 or is_stale(row.snapshot_at):
+        return False
+    if row.nhl_game_id is None or row.nhl_player_id is None:
+        return False
+    if row.event_mapping is None or row.player_mapping is None:
+        return False
+    if row.event_mapping.match_status != "matched":
+        return False
+    if row.player_mapping.match_status != "matched":
+        return False
+    return True
