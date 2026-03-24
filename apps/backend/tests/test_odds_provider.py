@@ -25,7 +25,7 @@ def test_the_odds_api_adapter_normalizes_rows_into_internal_schema() -> None:
                     "key": "draftkings",
                     "markets": [
                         {
-                            "key": "player_first_goal_scorer",
+                            "key": "player_goal_scorer_first",
                             "last_update": "2026-03-23T21:55:00Z",
                             "outcomes": [
                                 {"name": "Artemi Panarin", "price": "+425"},
@@ -64,7 +64,7 @@ def test_the_odds_api_adapter_skips_invalid_or_malformed_rows() -> None:
                     "key": "fanduel",
                     "markets": [
                         {
-                            "key": "player_first_goal_scorer",
+                            "key": "player_goal_scorer_first",
                             "last_update": "2026-03-23T21:50:00Z",
                             "outcomes": [
                                 {"name": "Bad Price A", "price": "N/A"},
@@ -98,7 +98,7 @@ def test_the_odds_api_adapter_skips_stale_rows() -> None:
                     "key": "fanduel",
                     "markets": [
                         {
-                            "key": "player_first_goal_scorer",
+                            "key": "player_goal_scorer_first",
                             "last_update": stale_update,
                             "outcomes": [{"name": "Artemi Panarin", "price": 425}],
                         }

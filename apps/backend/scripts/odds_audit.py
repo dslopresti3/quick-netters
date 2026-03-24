@@ -40,7 +40,7 @@ def _query_params(client: TheOddsApiClient, selected_date: date) -> dict[str, st
     return {
         "apiKey": api_key_value,
         "regions": "us",
-        "markets": "player_first_goal_scorer",
+        "markets": client.first_goal_market_key,
         "oddsFormat": "american",
         "dateFormat": "iso",
         "commenceTimeFrom": window_start.isoformat(),
@@ -120,7 +120,7 @@ def run_audit(selected_date: date) -> OddsAuditReport:
                 continue
             market_update = market_last_update = None
             for market in markets:
-                if not isinstance(market, dict) or market.get("key") != "player_first_goal_scorer":
+                if not isinstance(market, dict) or market.get("key") != TheOddsApiClient.first_goal_market_key:
                     continue
 
                 raw_update = market.get("last_update") or bookmaker.get("last_update")
