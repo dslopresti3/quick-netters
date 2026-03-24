@@ -435,12 +435,20 @@ def _match_player_to_projection(
 
     provider_aliases = name_aliases(player_name_raw)
     team_context_tokens = team_alias_tokens(provider_team_raw) if provider_team_raw else set()
+    event_team_tokens = team_alias_tokens(row.away_team_raw or "") | team_alias_tokens(row.home_team_raw or "")
+    apply_team_context_filter = bool(team_context_tokens)
+    if apply_team_context_filter and event_team_tokens and team_context_tokens.isdisjoint(event_team_tokens):
+        # Some books populate outcome.description with non-team metadata (e.g. "Any Other Player").
+        # In those cases, enforcing team context eliminates all valid player candidates.
+        apply_team_context_filter = False
 
     candidates: list[PlayerProjectionCandidate] = []
     for projection in projections:
         if not projection.roster_eligibility.is_active_roster:
             continue
-        if team_context_tokens and team_context_tokens.isdisjoint(team_alias_tokens(projection.roster_eligibility.active_team_name)):
+        if apply_team_context_filter and team_context_tokens.isdisjoint(
+            team_alias_tokens(projection.roster_eligibility.active_team_name)
+        ):
             continue
         if provider_aliases.isdisjoint(name_aliases(projection.player_name)):
             continue
