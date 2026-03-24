@@ -119,8 +119,8 @@ def test_the_odds_api_adapter_skips_stale_rows() -> None:
 def test_the_odds_api_client_fetches_event_odds_from_event_endpoints() -> None:
     selected_date = date(2026, 3, 23)
     events_payload = [
-        {"id": "evt-1"},
-        {"id": "evt-2"},
+        {"id": "evt-1", "commence_time": "2026-03-23T22:00:00Z"},
+        {"id": "evt-2", "commence_time": "2026-03-24T02:00:00Z"},
         {"id": None},
     ]
     event_1_odds_payload = {
@@ -173,7 +173,7 @@ def test_the_odds_api_client_fetches_event_odds_from_event_endpoints() -> None:
     assert "/events/evt-2/odds?" in requested_urls[2]
 
 
-def test_the_odds_api_client_uses_eastern_slate_window_for_event_query() -> None:
+def test_the_odds_api_client_applies_eastern_slate_window_after_events_fetch() -> None:
     selected_date = date(2026, 3, 24)
 
     class _Response:
@@ -184,7 +184,14 @@ def test_the_odds_api_client_uses_eastern_slate_window_for_event_query() -> None
             return False
 
         def read(self, *args, **kwargs):
-            return b"[]"
+            return json.dumps(
+                [
+                    {"id": "outside-window", "commence_time": "2026-03-24T03:59:59Z"},
+                    {"id": "inside-window-1", "commence_time": "2026-03-24T04:00:00Z"},
+                    {"id": "inside-window-2", "commence_time": "2026-03-25T03:59:59Z"},
+                    {"id": "outside-window-2", "commence_time": "2026-03-25T04:00:00Z"},
+                ]
+            ).encode("utf-8")
 
     requested_urls: list[str] = []
 
@@ -194,12 +201,11 @@ def test_the_odds_api_client_uses_eastern_slate_window_for_event_query() -> None
 
     client = TheOddsApiClient(api_key="test-key")
     with patch("app.services.odds_provider.urlopen", side_effect=_fake_urlopen):
-        rows = client.fetch_raw_events(selected_date)
+        event_ids = client.fetch_event_ids_for_slate(selected_date)
 
-    assert rows == []
+    assert event_ids == ["inside-window-1", "inside-window-2"]
     assert len(requested_urls) == 1
 
     parsed = urlparse(requested_urls[0])
     query = parse_qs(parsed.query)
-    assert query["commenceTimeFrom"] == ["2026-03-24T04:00:00+00:00"]
-    assert query["commenceTimeTo"] == ["2026-03-25T04:00:00+00:00"]
+    assert query == {"apiKey": ["test-key"], "dateFormat": ["iso"]}

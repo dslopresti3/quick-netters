@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 from app.services.identity import name_aliases, team_alias_tokens
 from app.services.recommendation_service import _match_event_to_game, _match_player_to_projection
 from app.services.odds import STALE_ODDS_THRESHOLD, NormalizedPlayerOdds
-from app.services.odds_provider import LiveOddsProvider, TheOddsApiClient, _parse_american_odds, _selected_slate_utc_window
+from app.services.odds_provider import LiveOddsProvider, TheOddsApiClient, _parse_american_odds
 from app.services.provider_wiring import build_provider_registry_from_env
 
 
@@ -19,6 +19,7 @@ class OddsAuditReport:
     upstream_odds_base_url: str | None
     upstream_query_params: dict[str, str] | None
     raw_event_count: int
+    selected_event_id_count: int
     extracted_outcome_count: int
     matched_game_count: int
     matched_player_count: int
@@ -34,16 +35,10 @@ class OddsAuditReport:
 
 
 def _query_params(client: TheOddsApiClient, selected_date: date) -> dict[str, str]:
-    window_start, window_end = _selected_slate_utc_window(selected_date, client.slate_timezone)
     api_key_value = "<redacted>" if client._api_key else "<missing>"
     return {
         "apiKey": api_key_value,
-        "regions": "us",
-        "markets": client.first_goal_market_key,
-        "oddsFormat": "american",
         "dateFormat": "iso",
-        "commenceTimeFrom": window_start.isoformat(),
-        "commenceTimeTo": window_end.isoformat(),
     }
 
 
@@ -63,22 +58,28 @@ def run_audit(selected_date: date) -> OddsAuditReport:
             inactive_by_game.setdefault(projection.game_id, []).append(projection)
 
     raw_events: list[dict] = []
+    events_index: list[dict] = []
+    selected_event_ids: list[str] = []
     base_url: str | None = None
     query_params: dict[str, str] | None = None
 
     if isinstance(providers.odds_provider, LiveOddsProvider):
         client = providers.odds_provider._client  # noqa: SLF001
         if isinstance(client, TheOddsApiClient):
-            base_url = client.event_odds_url_template
+            base_url = client.events_url
             query_params = _query_params(client, selected_date)
+            events_index = client.fetch_events_index()
+            selected_event_ids = client.fetch_event_ids_for_slate(selected_date)
             raw_events = client.fetch_raw_events(selected_date)
     elif hasattr(providers.odds_provider, "_provider"):
         live_provider = providers.odds_provider._provider  # noqa: SLF001
         if isinstance(live_provider, LiveOddsProvider):
             client = live_provider._client  # noqa: SLF001
             if isinstance(client, TheOddsApiClient):
-                base_url = client.event_odds_url_template
+                base_url = client.events_url
                 query_params = _query_params(client, selected_date)
+                events_index = client.fetch_events_index()
+                selected_event_ids = client.fetch_event_ids_for_slate(selected_date)
                 raw_events = client.fetch_raw_events(selected_date)
 
     extracted_outcome_count = 0
@@ -224,7 +225,8 @@ def run_audit(selected_date: date) -> OddsAuditReport:
         active_odds_provider_class=f"{providers.odds_provider.__class__.__module__}.{providers.odds_provider.__class__.__name__}",
         upstream_odds_base_url=base_url,
         upstream_query_params=query_params,
-        raw_event_count=len(raw_events),
+        raw_event_count=len(events_index),
+        selected_event_id_count=len(selected_event_ids),
         extracted_outcome_count=extracted_outcome_count,
         matched_game_count=len(matched_game_event_ids),
         matched_player_count=matched_player_count,

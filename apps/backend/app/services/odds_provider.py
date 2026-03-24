@@ -30,32 +30,49 @@ class TheOddsApiClient:
         if not self._api_key:
             return []
 
-        window_start, window_end = _selected_slate_utc_window(selected_date, self.slate_timezone)
-        event_query = urlencode(
-            {
-                "apiKey": self._api_key,
-                "dateFormat": "iso",
-                "commenceTimeFrom": window_start.isoformat(),
-                "commenceTimeTo": window_end.isoformat(),
-            }
-        )
-        event_payload = self._fetch_json(f"{self.events_url}?{event_query}")
-        if not isinstance(event_payload, list):
-            return []
-
+        event_ids = self.fetch_event_ids_for_slate(selected_date)
         raw_events: list[dict[str, Any]] = []
-        for event in event_payload:
-            if not isinstance(event, dict):
-                continue
-            event_id = event.get("id")
-            if not isinstance(event_id, str) or not event_id.strip():
-                continue
-            raw_event = self._fetch_event_odds(event_id=event_id.strip())
+        for event_id in event_ids:
+            raw_event = self._fetch_event_odds(event_id=event_id)
             if raw_event is None:
                 continue
             raw_events.append(raw_event)
 
         return raw_events
+
+    def fetch_event_ids_for_slate(self, selected_date: date) -> list[str]:
+        events = self.fetch_events_index()
+        if not events:
+            return []
+
+        window_start, window_end = _selected_slate_utc_window(selected_date, self.slate_timezone)
+        candidate_event_ids: list[str] = []
+        for event in events:
+            event_id = event.get("id")
+            if not isinstance(event_id, str) or not event_id.strip():
+                continue
+            commence_time = event.get("commence_time")
+            if not isinstance(commence_time, str):
+                continue
+            try:
+                parsed_commence = datetime.fromisoformat(commence_time.replace("Z", "+00:00")).astimezone(timezone.utc)
+            except ValueError:
+                continue
+            if parsed_commence < window_start or parsed_commence >= window_end:
+                continue
+            candidate_event_ids.append(event_id.strip())
+
+        return candidate_event_ids
+
+    def fetch_events_index(self) -> list[dict[str, Any]]:
+        if not self._api_key:
+            return []
+
+        event_query = urlencode({"apiKey": self._api_key, "dateFormat": "iso"})
+        event_payload = self._fetch_json(f"{self.events_url}?{event_query}")
+        if not isinstance(event_payload, list):
+            return []
+        return [event for event in event_payload if isinstance(event, dict)]
 
     def _fetch_event_odds(self, event_id: str) -> dict[str, Any] | None:
         params = urlencode(
