@@ -208,4 +208,42 @@ def test_the_odds_api_client_applies_eastern_slate_window_after_events_fetch() -
 
     parsed = urlparse(requested_urls[0])
     query = parse_qs(parsed.query)
-    assert query == {"apiKey": ["test-key"]}
+    assert query == {"apiKey": ["test-key"], "dateFormat": ["iso"]}
+
+
+def test_the_odds_api_client_event_level_odds_request_uses_expected_params() -> None:
+    event_odds_payload = {"id": "evt-1", "bookmakers": []}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self, *args, **kwargs):
+            return json.dumps(event_odds_payload).encode("utf-8")
+
+    requested_urls: list[str] = []
+
+    def _fake_urlopen(request, timeout=10):  # noqa: ANN001
+        requested_urls.append(request.full_url)
+        return _Response()
+
+    client = TheOddsApiClient(api_key="test-key")
+    with patch("app.services.odds_provider.urlopen", side_effect=_fake_urlopen):
+        payload = client._fetch_event_odds("evt-1")
+
+    assert payload == event_odds_payload
+    assert len(requested_urls) == 1
+    assert "/events/evt-1/odds?" in requested_urls[0]
+    parsed = urlparse(requested_urls[0])
+    query = parse_qs(parsed.query)
+    assert query == {
+        "apiKey": ["test-key"],
+        "regions": ["us"],
+        "bookmakers": ["draftkings"],
+        "markets": ["player_goal_scorer_first"],
+        "oddsFormat": ["american"],
+        "dateFormat": ["iso"],
+    }

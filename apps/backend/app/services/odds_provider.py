@@ -68,7 +68,7 @@ class TheOddsApiClient:
         if not self._api_key:
             return []
 
-        event_query = urlencode({"apiKey": self._api_key})
+        event_query = urlencode({"apiKey": self._api_key, "dateFormat": "iso"})
         event_payload = self._fetch_json(f"{self.events_url}?{event_query}")
         if not isinstance(event_payload, list):
             return []
@@ -79,6 +79,7 @@ class TheOddsApiClient:
             {
                 "apiKey": self._api_key,
                 "regions": "us",
+                "bookmakers": "draftkings",
                 "markets": self.first_goal_market_key,
                 "oddsFormat": "american",
                 "dateFormat": "iso",
