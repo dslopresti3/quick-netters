@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Any
 from urllib.error import HTTPError, URLError
 
@@ -124,18 +125,23 @@ def _extract_games(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return []    
 
 def _matches_selected_schedule_window(game: dict[str, Any], selected_date: date) -> bool:
-    relevant_dates = {
-        selected_date - timedelta(days=1),
-        selected_date,
-        selected_date + timedelta(days=1),
-    }
+    game_date = _parse_date_hint(game.get("gameDate"))
+    if game_date is not None:
+        return game_date == selected_date
 
-    primary_hints, secondary_hints = _extract_game_hint_dates(game)
-    if primary_hints:
-        return any(hint_date in relevant_dates for hint_date in primary_hints)
-    if not secondary_hints:
-        return True
-    return any(hint_date in relevant_dates for hint_date in secondary_hints)
+    week_date = _parse_date_hint(game.get("_weekDate"))
+    if week_date is not None:
+        return week_date == selected_date
+
+    start_time_utc = game.get("startTimeUTC")
+    if not isinstance(start_time_utc, str):
+        return False
+
+    try:
+        start_dt_utc = _parse_utc_datetime(start_time_utc)
+    except ValueError:
+        return False
+    return start_dt_utc.astimezone(ZoneInfo("America/New_York")).date() == selected_date
 
 
 def _extract_game_hint_dates(game: dict[str, Any]) -> tuple[set[date], set[date]]:
