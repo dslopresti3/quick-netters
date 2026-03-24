@@ -9,6 +9,8 @@ from app.services.identity import team_alias_tokens
 from app.services.interfaces import PlayerHistoricalProduction
 
 NHL_WEB_BASE = "https://api-web.nhle.com/v1"
+NHL_ROSTER_TIMEOUT_SECONDS = 8
+NHL_PLAYER_HISTORY_TIMEOUT_SECONDS = 4
 
 TEAM_NAME_TO_ABBREV = {
     "anaheim ducks": "ANA",
@@ -80,7 +82,10 @@ def team_abbrev_for_name(team_name: str) -> str | None:
 
 
 def fetch_team_roster_current(team_abbrev: str) -> list[NhlRosterPlayer]:
-    payload = fetch_json(url=f"{NHL_WEB_BASE}/roster/{team_abbrev}/current")
+    payload = fetch_json(
+        url=f"{NHL_WEB_BASE}/roster/{team_abbrev}/current",
+        timeout_seconds=NHL_ROSTER_TIMEOUT_SECONDS,
+    )
     players = _extract_roster_players(payload)
     return [
         NhlRosterPlayer(
@@ -94,7 +99,10 @@ def fetch_team_roster_current(team_abbrev: str) -> list[NhlRosterPlayer]:
 
 def fetch_player_first_goal_history(player_id: str, selected_date: date) -> PlayerHistoricalProduction:
     season = _season_from_date(selected_date)
-    payload = fetch_json(url=f"{NHL_WEB_BASE}/player/{player_id}/game-log/{season}/2")
+    payload = fetch_json(
+        url=f"{NHL_WEB_BASE}/player/{player_id}/game-log/{season}/2",
+        timeout_seconds=NHL_PLAYER_HISTORY_TIMEOUT_SECONDS,
+    )
     game_log_rows = _extract_game_log_rows(payload)
 
     season_games_played = float(len(game_log_rows)) if game_log_rows else None
