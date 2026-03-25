@@ -724,7 +724,13 @@ def _load_player_first_goal_history_from_artifact(
         player_id = raw_player_id.strip()
         if player_id not in eligible_player_ids:
             continue
-        first_goals = _as_float(row.get("historical_season_first_goals"))
+        first_goals = _as_float(
+            _coalesce(
+                row.get("historical_season_first_goals"),
+                row.get("season_first_goals"),
+                row.get("first_goals_this_year"),
+            )
+        )
         games_played = _as_float(row.get("historical_season_games_played"))
         total_goals = _as_float(row.get("historical_season_total_goals"))
         total_shots = _as_float(row.get("historical_season_total_shots"))
@@ -1225,7 +1231,13 @@ def _load_projection_rows_for_date_from_artifact(path: Path, selected_date: date
                 projected_team_name=team_name_raw.strip(),
                 model_probability=probability,
                 historical_production=PlayerHistoricalProduction(
-                    season_first_goals=_as_float(row.get("historical_season_first_goals")),
+                    season_first_goals=_as_float(
+                        _coalesce(
+                            row.get("historical_season_first_goals"),
+                            row.get("season_first_goals"),
+                            row.get("first_goals_this_year"),
+                        )
+                    ),
                     season_games_played=_as_float(row.get("historical_season_games_played")),
                     season_total_goals=_as_float(row.get("historical_season_total_goals")),
                     season_total_shots=_as_float(row.get("historical_season_total_shots")),
@@ -1326,6 +1338,13 @@ def _as_iso_date(value: Any) -> date | None:
         return date.fromisoformat(value.strip())
     except ValueError:
         return None
+
+
+def _coalesce(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
 
 
 def _normalize_position_code(value: Any) -> str | None:
