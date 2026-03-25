@@ -871,6 +871,95 @@ def test_recent_history_merge_uses_latest_values_instead_of_peak_max(tmp_path) -
     assert history["p1"].recent_10_first_goals == 2
 
 
+def test_history_loader_accepts_first_goal_alias_fields(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {
+                "date": "2026-03-24",
+                "game_id": "g1",
+                "nhl_player_id": "p1",
+                "player_id": "p1",
+                "player_name": "Player One",
+                "team_name": "Team A",
+                "active_team_name": "Team A",
+                "is_active_roster": True,
+                "model_probability": 0.12,
+                "first_goals_this_year": 5,
+                "historical_season_games_played": 66,
+            },
+            {
+                "date": "2026-03-23",
+                "game_id": "g0",
+                "nhl_player_id": "p2",
+                "player_id": "p2",
+                "player_name": "Player Two",
+                "team_name": "Team A",
+                "active_team_name": "Team A",
+                "is_active_roster": True,
+                "model_probability": 0.11,
+                "season_first_goals": 4,
+                "historical_season_games_played": 60,
+            },
+        ],
+    )
+
+    from app.services.dev_projection_provider import _load_player_first_goal_history_from_artifact
+
+    history = _load_player_first_goal_history_from_artifact(
+        selected_date=date(2026, 3, 25),
+        eligible_player_ids={"p1", "p2"},
+        path=artifact,
+    )
+
+    assert history["p1"].season_first_goals == 5
+    assert history["p2"].season_first_goals == 4
+
+
+def test_projection_row_loader_accepts_first_goal_alias_fields(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {
+                "date": "2026-03-25",
+                "game_id": "g1",
+                "nhl_player_id": "p1",
+                "player_id": "p1",
+                "player_name": "Player One",
+                "team_name": "Team A",
+                "active_team_name": "Team A",
+                "is_active_roster": True,
+                "position_code": "C",
+                "model_probability": 0.21,
+                "first_goals_this_year": 3,
+            },
+            {
+                "date": "2026-03-25",
+                "game_id": "g1",
+                "nhl_player_id": "p2",
+                "player_id": "p2",
+                "player_name": "Player Two",
+                "team_name": "Team A",
+                "active_team_name": "Team A",
+                "is_active_roster": True,
+                "position_code": "LW",
+                "model_probability": 0.19,
+                "season_first_goals": 2,
+            },
+        ],
+    )
+
+    from app.services.dev_projection_provider import _load_projection_rows_for_date_from_artifact
+
+    rows = _load_projection_rows_for_date_from_artifact(artifact, date(2026, 3, 25))
+    by_id = {row.nhl_player_id: row for row in rows}
+
+    assert by_id["p1"].historical_production.season_first_goals == 3
+    assert by_id["p2"].historical_production.season_first_goals == 2
+
+
 def test_team_recent_form_is_dampened_and_cannot_dominate_team_probability(tmp_path) -> None:
     artifact = tmp_path / "projections.json"
     _write_artifact(artifact, [])
