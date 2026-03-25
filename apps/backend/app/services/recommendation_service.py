@@ -38,6 +38,9 @@ _SCORE_WEIGHTS = {
 TOP_PLAY_MIN_ODDS = 1000
 TOP_PLAY_MAX_ODDS = 2500
 TOP_PLAY_MIN_MODEL_PROBABILITY = 0.03
+TOP_THREE_MIN_MODEL_PROBABILITY = 0.03
+TOP_THREE_MIN_EV = -0.02
+TOP_THREE_MIN_EDGE = -0.01
 
 UNDERDOG_MIN_ODDS = 1800
 UNDERDOG_MAX_ODDS = 4000
@@ -629,6 +632,15 @@ def _top_play_eligible(recommendation: Recommendation) -> bool:
     )
 
 
+def _top_three_eligible(recommendation: Recommendation) -> bool:
+    return (
+        recommendation.model_probability >= TOP_THREE_MIN_MODEL_PROBABILITY
+        and recommendation.ev >= TOP_THREE_MIN_EV
+        and recommendation.edge >= TOP_THREE_MIN_EDGE
+        and recommendation.market_odds <= TOP_PLAY_MAX_ODDS
+    )
+
+
 def _underdog_eligible(recommendation: Recommendation) -> bool:
     return (
         recommendation.ev > 0
@@ -640,7 +652,7 @@ def _underdog_eligible(recommendation: Recommendation) -> bool:
 
 
 def _attach_play_scores(game_recommendations: list[Recommendation]) -> None:
-    eligible_top_plays = [recommendation for recommendation in game_recommendations if _top_play_eligible(recommendation)]
+    eligible_top_plays = [recommendation for recommendation in game_recommendations if _top_three_eligible(recommendation)]
     if not eligible_top_plays:
         for recommendation in game_recommendations:
             recommendation.recommendation_score = 0.0
@@ -665,7 +677,7 @@ def _attach_play_scores(game_recommendations: list[Recommendation]) -> None:
 
 
 def _select_top_play_bucket(game_recommendations: list[Recommendation]) -> tuple[list[Recommendation], Recommendation | None]:
-    eligible_top_plays = [recommendation for recommendation in game_recommendations if _top_play_eligible(recommendation)]
+    eligible_top_plays = [recommendation for recommendation in game_recommendations if _top_three_eligible(recommendation)]
     sorted_top_plays = sorted(
         eligible_top_plays,
         key=lambda recommendation: (
@@ -677,7 +689,25 @@ def _select_top_play_bucket(game_recommendations: list[Recommendation]) -> tuple
         reverse=True,
     )
     top_plays = sorted_top_plays[:3]
-    best_bet = sorted_top_plays[0] if sorted_top_plays else None
+
+    if len(top_plays) < 3:
+        fallback_candidates = sorted(
+            (recommendation for recommendation in game_recommendations if recommendation.player_id not in {pick.player_id for pick in top_plays}),
+            key=lambda recommendation: (
+                recommendation.recommendation_score or 0.0,
+                recommendation.model_probability,
+                recommendation.edge,
+                recommendation.ev,
+            ),
+            reverse=True,
+        )
+        for recommendation in fallback_candidates:
+            top_plays.append(recommendation)
+            if len(top_plays) == 3:
+                break
+
+    strict_top_plays = [recommendation for recommendation in sorted_top_plays if _top_play_eligible(recommendation)]
+    best_bet = strict_top_plays[0] if strict_top_plays else None
     return top_plays, best_bet
 
 
