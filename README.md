@@ -1,41 +1,93 @@
-# Quick Netters Monorepo
+# Quick Netters
 
-Initial scaffold for a mock-hockey first goal scorer support platform.
+Quick Netters is an NHL first-goal recommendation app built as a monorepo. It combines model-generated player scoring probabilities with market odds to produce clear, game-level betting recommendations.
 
-## Monorepo structure
+## Overview
 
-```text
-quick-netters/
-├── .env.example
-├── apps/
-│   ├── backend/               # FastAPI app with placeholder endpoints
-│   │   ├── .env.example
-│   │   ├── requirements.txt
-│   │   └── app/
-│   │       ├── api/routes.py
-│   │       ├── services/
-│   │       │   ├── interfaces.py
-│   │       │   └── mock_services.py
-│   │       └── utils/date_validation.py
-│   └── frontend/              # Next.js app with mock components/pages
-│       ├── .env.example
-│       ├── app/
-│       ├── components/
-│       └── lib/
-└── packages/
-    └── modeling/              # Python package for future modeling workflows
-```
+For a selected UTC date, the platform:
 
-## Local development setup
+1. fetches the NHL schedule,
+2. loads first-goal projection candidates,
+3. matches eligible players to market odds snapshots,
+4. computes value metrics in the backend service layer,
+5. returns recommendation buckets for each game.
 
-### 1) Prerequisites
+## Feature Summary
+
+- **API-backed slate and game detail views** (no hardcoded UI picks).
+- **Single-game recommendation buckets**:
+  - **Top 3 Plays**
+  - **Best Bet**
+  - **Underdog Value Play**
+- **Date availability metadata** for frontend picker bounds and empty states.
+- **Top projected scorer per team** shown on game cards/details.
+- **Modeling package** for historical data prep and first-goal probability generation.
+
+## Architecture at a Glance
+
+| Layer | Location | Responsibility |
+|---|---|---|
+| Frontend | `apps/frontend` | Next.js UI for date selection, slate browsing, and game detail recommendations |
+| Backend API | `apps/backend/app/api` | FastAPI routes for availability, games, daily recommendations, game recommendations |
+| Recommendation Service | `apps/backend/app/services/recommendation_service.py` | Computes recommendation math and selects bucket outputs |
+| Modeling Pipelines | `packages/modeling` | Historical ingestion + first-goal model pipeline support |
+| Product/Tech Docs | `docs/` and `apps/backend/docs/` | Odds/value formulas, pipeline docs, API metadata contracts |
+
+## Current Recommendation Logic
+
+### Buckets
+
+Quick Netters uses three distinct bucket outputs for single-game recommendations:
+
+1. **Top 3 Plays**
+   - Broader blended ranking of best overall candidates.
+   - **Not** simply top 3 by raw model probability.
+2. **Best Bet**
+   - Strongest strict value play after tighter eligibility filters.
+3. **Underdog Value Play**
+   - Higher-odds positive-value option (positive edge + positive EV).
+   - Can be `null` when no candidate qualifies.
+
+### Recommendation Metrics
+
+Each recommendation includes:
+
+- `model_probability`
+- `market_odds`
+- `decimal_odds`
+- `implied_probability`
+- `edge`
+- `ev`
+
+Recommendation math and bucket selection are computed in `ValueRecommendationService` (backend/service layer).
+
+## API Snapshot
+
+Local backend base URL: `http://localhost:8000`
+
+- `GET /availability/date?date=YYYY-MM-DD`
+- `GET /games?date=YYYY-MM-DD&timezone=America/New_York`
+- `GET /recommendations/daily?date=YYYY-MM-DD`
+- `GET /recommendations/game?game_id=...&date=YYYY-MM-DD&timezone=America/New_York`
+
+Single-game response shape includes:
+
+- `top_plays`
+- `best_bet`
+- `underdog_value_play`
+
+`recommendations` is still returned for compatibility and currently aligns with `top_plays`.
+
+## Local Setup
+
+### Prerequisites
 
 - Node.js 20+
 - Python 3.11+
 
-### 2) Configure environment variables
+### Environment Configuration
 
-Copy examples into local env files:
+From repo root:
 
 ```bash
 cp .env.example .env
@@ -43,7 +95,18 @@ cp apps/frontend/.env.example apps/frontend/.env.local
 cp apps/backend/.env.example apps/backend/.env
 ```
 
-### 3) Run frontend (Next.js)
+## Run Locally
+
+### Frontend (Next.js)
+
+From repo root:
+
+```bash
+npm install
+npm run dev:frontend
+```
+
+Alternative:
 
 ```bash
 cd apps/frontend
@@ -51,9 +114,9 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000.
+Frontend: `http://localhost:3000`
 
-### 4) Run backend (FastAPI)
+### Backend (FastAPI)
 
 ```bash
 cd apps/backend
@@ -63,26 +126,58 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-API available at http://localhost:8000 and docs at http://localhost:8000/docs.
+Backend: `http://localhost:8000` (OpenAPI: `http://localhost:8000/docs`)
 
-## Notes
+## Testing and Checks
 
-- No real external APIs are implemented yet.
-- Backend provider wiring is configured in `apps/backend/app/services/provider_wiring.py` via `BACKEND_PROVIDER_MODE` (`real` default, `mock` for local fallback).
-- Real projection loading reads a structured artifact (`BACKEND_PROJECTION_ARTIFACT_PATH`, default `apps/backend/app/data/projections/player_first_goal_projections.json`).
-- Mock schedule/projection/odds providers remain available as development fallbacks and are no longer hardcoded in API routes.
-- Date input is validated: selected dates more than 1 day ahead are rejected with HTTP 422.
-- Odds/value recommendation layer implemented with provider abstraction and formulas documented in `docs/odds-value-layer.md`.
-- PostgreSQL is planned and represented by `DATABASE_URL` examples only.
-
-
-## Historical data pipeline (hockey)
-
-Historical ingestion/normalization and feature-ready outputs live in `packages/modeling/src/quick_netters_modeling/historical/`.
-
-- Design and schema details: `docs/historical-data-pipeline.md`
-- CLI entrypoint:
+### Backend Tests
 
 ```bash
-PYTHONPATH=packages/modeling/src python -m quick_netters_modeling.historical.cli --current-season 2026 --data-root packages/modeling/data
+cd apps/backend
+source .venv/bin/activate
+python -m pytest tests
 ```
+
+If needed:
+
+```bash
+pip install pytest
+```
+
+### Frontend Lint
+
+From repo root:
+
+```bash
+npm run lint:frontend
+```
+
+## Repository Structure
+
+```text
+quick-netters/
+├── apps/
+│   ├── backend/
+│   │   ├── app/
+│   │   └── docs/
+│   └── frontend/
+├── docs/
+└── packages/
+    └── modeling/
+```
+
+## Additional Documentation
+
+- Odds and value layer: `docs/odds-value-layer.md`
+- Historical data pipeline: `docs/historical-data-pipeline.md`
+- First-goal modeling pipeline: `docs/first-goal-modeling-pipeline.md`
+- Date availability contract: `apps/backend/docs/date-availability-metadata.md`
+
+## Current Status
+
+Active focus areas:
+
+- stable API-backed recommendation delivery,
+- consistent Top 3 / Best Bet / Underdog semantics,
+- resilient data-availability signaling,
+- iterative modeling pipeline improvements.

@@ -1,6 +1,6 @@
 # Date Availability Metadata Contract
 
-The backend now exposes `GET /availability/date?date=YYYY-MM-DD` so the frontend can render date-picker and empty-state UX from server truth instead of local mocks.
+The backend exposes `GET /availability/date?date=YYYY-MM-DD` so the frontend can drive date-picker limits and empty-state UX from API truth.
 
 ## Response schema
 
@@ -23,19 +23,29 @@ The backend now exposes `GET /availability/date?date=YYYY-MM-DD` so the frontend
 
 ## Frontend integration guidance
 
-1. Call `/availability/date` whenever the selected date changes (or during initial load).
-2. Bind your date picker directly to `min_allowed_date` and `max_allowed_date`.
-3. Use `valid_by_product_rule` + `status` to choose UI state:
+1. Call `/availability/date` whenever selected date changes (or on initial load).
+2. Bind date picker bounds directly to `min_allowed_date` and `max_allowed_date`.
+3. Use `valid_by_product_rule` + `status` to drive UI state:
    - `invalid_date`: block data requests and show `messages`.
    - `no_schedule`: show no-games state.
-   - `missing_projections`: show schedule only; disable value picks.
-   - `missing_odds`: show schedule/projections; disable value picks.
-   - `ready`: proceed with full recommendations experience.
-4. Keep calling existing data endpoints (`/games`, `/recommendations/daily`, `/recommendations/game`) only when state supports it.
+   - `missing_projections`: show schedule-only state; hide recommendation buckets.
+   - `missing_odds`: show schedule/projection context; hide value buckets.
+   - `ready`: render full recommendation experience.
+4. Call `/games`, `/recommendations/daily`, and `/recommendations/game` only when state supports it.
+
+## Interaction with recommendation buckets
+
+For game detail UX, full bucket rendering requires `status=ready`:
+
+- Top 3 Plays
+- Best Bet
+- Underdog Value Play
+
+If underdog data is unavailable for a ready game, `underdog_value_play` may be `null`; the UI should hide that section gracefully.
 
 ## Product-rule restriction
 
 By default, users may select only UTC today and UTC tomorrow.
 
-- This is enforced by validation in `ensure_date_not_more_than_one_day_ahead`.
+- Enforced by `ensure_date_not_more_than_one_day_ahead`.
 - If `STRICT_TODAY_TOMORROW_DATE_WINDOW=false` is explicitly configured, historical dates are allowed while the upper bound remains tomorrow.

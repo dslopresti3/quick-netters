@@ -1,84 +1,97 @@
-# Odds and value layer assumptions
+# Odds and Value Recommendation Layer
 
-This document describes the assumptions and formulas used by the backend odds/value recommendation layer.
+This document describes the backend service logic that converts model projections + market odds into recommendation buckets.
 
 ## Service boundaries
 
 - Odds ingestion is abstracted behind `OddsProvider`.
-- Recommendation ranking uses a `RecommendationsProvider` implementation (`ValueRecommendationService`) that depends on `OddsProvider`.
-- Current implementation includes `MockOddsService` as a placeholder provider.
+- Projection ingestion is abstracted behind `ProjectionProvider`.
+- Bucket selection and recommendation math are computed in `ValueRecommendationService` (backend/service layer).
+- API routes expose precomputed recommendation objects; they do not recompute pricing math.
+
+## Recommendation buckets (single-game)
+
+For `GET /recommendations/game`, the backend returns three bucketed outputs:
+
+- `top_plays` (Top 3 Plays)
+- `best_bet`
+- `underdog_value_play`
+
+It also returns `recommendations` for compatibility, which currently aligns with `top_plays`.
+
+### Bucket intent
+
+- **Top 3 Plays**: broader blended ranking of strongest overall candidates.
+  - Not simply the top 3 by model probability.
+- **Best Bet**: strongest strict value play from tighter eligibility filters.
+- **Underdog Value Play**: higher-odds value option with positive EV and edge.
+  - May be `null` if no underdog candidate qualifies.
+
+## Recommendation fields
+
+Each recommendation includes these value metrics:
+
+- `model_probability`
+- `market_odds`
+- `decimal_odds`
+- `implied_probability`
+- `edge`
+- `ev`
+
+Additional metadata (for example confidence and timestamps) is included where available.
 
 ## Normalized odds shape
 
-Each provider record is normalized into `NormalizedPlayerOdds`:
+Provider records are normalized into `NormalizedPlayerOdds`:
 
 - `game_id` (string)
 - `player_id` (string)
 - `market_odds_american` (int)
 - `snapshot_at` (UTC datetime)
 
-When multiple snapshots exist for the same game/player, only the latest timestamp is used.
+When multiple snapshots exist for the same game/player, the latest timestamp is used.
 
-## Freshness / stale handling
+## Freshness and validity handling
 
-- Snapshot recency threshold is **30 minutes** (`STALE_ODDS_THRESHOLD`).
-- Stale snapshots are skipped.
-- Missing snapshots are skipped.
+A player is excluded when odds are stale/invalid or pricing math cannot be computed.
 
-## Pricing validity
+Current checks include:
 
-A player is excluded from recommendations when:
+- stale snapshot filtering (30-minute threshold),
+- `market_odds_american == 0` exclusion,
+- invalid probability/odds conversions,
+- non-positive edge/EV for strict value buckets.
 
-- `market_odds_american == 0` (invalid odds)
-- implied probability cannot be computed
-- fair odds cannot be computed from model probability
-- expected value cannot be computed
-
-## Formulas
+## Core formulas
 
 ### Implied probability from American odds
 
 - Positive odds (`+X`): `100 / (X + 100)`
-- Negative odds (`-X`): `X / (X + 100)` using `X = abs(odds)`
+- Negative odds (`-X`): `X / (X + 100)`, where `X = abs(odds)`
 
 ### Fair American odds from model probability `p`
 
-- If `p < 0.5` (underdog): `+ 100 * (1 - p) / p`
-- If `p >= 0.5` (favorite): `- 100 * p / (1 - p)`
+- If `p < 0.5`: `+100 * (1 - p) / p`
+- If `p >= 0.5`: `-100 * p / (1 - p)`
 - `p <= 0` or `p >= 1` is invalid
 
 ### Edge
 
 - `edge = model_probability - implied_probability`
-- Only positive edge recommendations are kept.
 
-### Expected value (per 1 unit risk)
+### EV (per 1 unit risk)
 
-Let `b` be the net payout multiplier for 1 unit risk:
+Let `b` be net payout multiplier for 1 unit risk:
 
 - Positive odds `+X`: `b = X / 100`
-- Negative odds `-X`: `b = 100 / X` using `X = abs(odds)`
+- Negative odds `-X`: `b = 100 / X`, where `X = abs(odds)`
 
 Then:
 
-- `EV = p * b - (1 - p)`
+- `ev = p * b - (1 - p)`
 
-## Ranking
+## Ranking notes
 
-Recommendations are sorted descending by:
-
-1. `ev`
-2. `edge`
-3. `model_probability`
-
-Returned results are:
-
-- top 3 daily value picks
-- top 3 picks for a specific game
-
-## API additions
-
-Recommendations now include:
-
-- `implied_probability`
-- `odds_snapshot_at`
+- Game-level Top 3 Plays are selected via blended play scoring within eligibility constraints.
+- Best Bet is selected from stricter value-eligible candidates.
+- Underdog Value Play uses a separate higher-odds scoring/eligibility path.
