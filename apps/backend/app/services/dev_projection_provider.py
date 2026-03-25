@@ -287,17 +287,18 @@ class AutoGeneratingProjectionProvider(ProjectionProvider):
                 "eligible_player_pool_count": len(eligible_player_pool),
             },
         )
+        eligible_player_ids = _eligible_player_ids_from_pool(eligible_player_pool)
         logger.info(
             "games player first-goal history fetch start",
             extra={
                 "selected_date": selected_date.isoformat(),
-                "eligible_player_count": len({candidate.player.player_id for candidate in eligible_player_pool}),
+                "eligible_player_count": len(eligible_player_ids),
             },
         )
         history_started = perf_counter()
         player_history = self._history_loader(
             selected_date,
-            {candidate.player.player_id for candidate in eligible_player_pool},
+            eligible_player_ids,
             self._artifact_path,
         )
         history_elapsed_ms = round((perf_counter() - history_started) * 1000, 2)
@@ -346,6 +347,18 @@ class _EligiblePlayerCandidate:
     projected_team_name: str
     is_home_team: bool
     player: ActiveRosterPlayer
+
+
+def _eligible_player_ids_from_pool(eligible_player_pool: list[_EligiblePlayerCandidate]) -> set[str]:
+    player_ids: set[str] = set()
+    for candidate in eligible_player_pool:
+        raw_player_id = candidate.player.player_id
+        if raw_player_id is None:
+            continue
+        normalized_player_id = str(raw_player_id).strip()
+        if normalized_player_id:
+            player_ids.add(normalized_player_id)
+    return player_ids
 
 
 @dataclass(frozen=True)

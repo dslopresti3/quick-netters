@@ -514,6 +514,53 @@ def test_history_load_is_filtered_to_active_roster_eligible_player_ids(tmp_path)
     assert seen_ids == {"8479323", "8477956"}
 
 
+def test_history_loader_receives_normalized_string_player_ids(tmp_path) -> None:
+    selected_date = date(2026, 3, 24)
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026032401",
+                    game_time=datetime(2026, 3, 24, 23, 0, tzinfo=timezone.utc),
+                    away_team="NY Rangers",
+                    home_team="Boston Bruins",
+                )
+            ]
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(
+        json.dumps(
+            {
+                "players": [
+                    {"player_id": 8479323, "player_name": "Artemi Panarin", "active_team_name": "NY Rangers", "is_active_roster": True},
+                    {"player_id": " 8477956 ", "player_name": "David Pastrnak", "active_team_name": "Boston Bruins", "is_active_roster": True},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    artifact = tmp_path / "projections.json"
+    _write_artifact(artifact, [])
+    seen_ids: set[str] = set()
+
+    def _capturing_history_loader(_selected_date, eligible_player_ids, _path):  # noqa: ANN001
+        seen_ids.update(eligible_player_ids)
+        return {}
+
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=ActiveRosterRepository(roster_path=roster_path),
+        history_loader=_capturing_history_loader,
+    )
+
+    provider.fetch_player_first_goal_projections(selected_date)
+
+    assert seen_ids == {"8479323", "8477956"}
+    assert all(isinstance(player_id, str) for player_id in seen_ids)
+
+
 def test_equal_history_players_use_ascending_name_tiebreaker_not_descending(tmp_path) -> None:
     artifact = tmp_path / "projections.json"
     _write_artifact(artifact, [])
