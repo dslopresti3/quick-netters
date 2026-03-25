@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { GameTopThreeStars } from "../../../components/game-top-three-stars";
 import { fetchDateAvailability, fetchGameRecommendations, getCurrentUtcDate, resolveDisplayTimezone } from "../../../lib/api";
 
 type GameDetailPageProps = {
@@ -124,32 +125,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
         ) : topBets.length === 0 ? (
           <p className="empty-state">No value picks available yet for this game.</p>
         ) : (
-          <table className="bets-table">
-            <thead>
-              <tr>
-                <th>Player</th>
-                <th>Model probability</th>
-                <th>Fair odds</th>
-                <th>Market odds</th>
-                <th>Edge</th>
-                <th>EV</th>
-                <th>Confidence</th>
-              </tr>
-            </thead>
-            <tbody>
-              {topBets.map((bet) => (
-                <tr key={bet.player_id}>
-                  <td>{bet.player_name}</td>
-                  <td>{(bet.model_probability * 100).toFixed(1)}%</td>
-                  <td>+{bet.fair_odds}</td>
-                  <td>+{bet.market_odds}</td>
-                  <td>{(bet.edge * 100).toFixed(1)}%</td>
-                  <td>{(bet.ev * 100).toFixed(1)}%</td>
-                  <td>{bet.confidence_tag ?? "-"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <GameTopThreeStars picks={topBets} />
         )}
       </section>
     </main>

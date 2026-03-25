@@ -223,6 +223,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
                     home_team=game.home_team,
                     player_id=player_id,
                     player_name=projection.player_name,
+                    player_team=projection.projected_team_name,
                     model_probability=round(projection.model_probability, 4),
                     fair_odds=fair_odds,
                     market_odds=odds_snapshot.market_odds_american,
@@ -245,6 +246,8 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
                     implied_probability=round(implied_probability, 4),
                     odds_snapshot_at=odds_snapshot.snapshot_at,
                     confidence_tag=_confidence_tag(ev, confidence_score),
+                    goals_this_year=projection.historical_production.season_total_goals,
+                    first_goals_this_year=projection.historical_production.season_first_goals,
                 )
             )
 
