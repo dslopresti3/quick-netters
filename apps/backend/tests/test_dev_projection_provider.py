@@ -1124,7 +1124,11 @@ def test_history_loader_fetches_live_history_by_default_when_missing(monkeypatch
         calls.append(player_id)
         return PlayerHistoricalProduction(season_first_goals=1.0, season_games_played=10.0)
 
-    with patch("app.services.dev_projection_provider.fetch_player_first_goal_history", side_effect=_fake_fetch):
+    with (
+        patch("app.services.dev_projection_provider.refresh_incremental_first_goal_derived_data"),
+        patch("app.services.dev_projection_provider.load_stored_first_goal_derived_history", return_value={}),
+        patch("app.services.dev_projection_provider.fetch_player_first_goal_history", side_effect=_fake_fetch),
+    ):
         from app.services.dev_projection_provider import load_player_first_goal_history_from_nhl_api
 
         history = load_player_first_goal_history_from_nhl_api(
@@ -1135,6 +1139,35 @@ def test_history_loader_fetches_live_history_by_default_when_missing(monkeypatch
 
     assert set(calls) == {"8477956", "8478402"}
     assert history["8477956"].season_first_goals == 1.0
+
+
+def test_history_loader_prefers_stored_incremental_first_goal_totals(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("NHL_HISTORY_MAX_LIVE_REQUESTS_PER_GAMES", raising=False)
+    monkeypatch.delenv("NHL_HISTORY_MAX_LIVE_REQUESTS_PER_GAME", raising=False)
+
+    with (
+        patch("app.services.dev_projection_provider.refresh_incremental_first_goal_derived_data"),
+        patch(
+            "app.services.dev_projection_provider.load_stored_first_goal_derived_history",
+            return_value={
+                "8477956": PlayerHistoricalProduction(season_first_goals=4.0, season_first_period_goals=6.0),
+            },
+        ),
+        patch(
+            "app.services.dev_projection_provider.fetch_player_first_goal_history",
+            return_value=PlayerHistoricalProduction(season_first_goals=1.0, season_first_period_goals=2.0, season_games_played=10.0),
+        ),
+    ):
+        from app.services.dev_projection_provider import load_player_first_goal_history_from_nhl_api
+
+        history = load_player_first_goal_history_from_nhl_api(
+            selected_date=date(2026, 3, 25),
+            eligible_player_ids={"8477956"},
+            path=tmp_path / "missing-artifact.json",
+        )
+
+    assert history["8477956"].season_first_goals == 4.0
+    assert history["8477956"].season_first_period_goals == 6.0
 
 
 def test_real_mode_common_team_names_generate_rows_with_nhl_api_rosters(tmp_path, monkeypatch) -> None:

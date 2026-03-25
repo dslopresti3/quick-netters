@@ -10,7 +10,13 @@ from time import perf_counter
 from typing import Any, Callable, Protocol
 
 from app.api.schemas import GameSummary
-from app.services.nhl_api_data import fetch_player_first_goal_history, fetch_team_roster_current, team_abbrev_for_name
+from app.services.nhl_api_data import (
+    fetch_player_first_goal_history,
+    fetch_team_roster_current,
+    load_stored_first_goal_derived_history,
+    refresh_incremental_first_goal_derived_data,
+    team_abbrev_for_name,
+)
 from app.services.interfaces import (
     PlayerHistoricalProduction,
     PlayerProjectionCandidate,
@@ -915,11 +921,45 @@ def load_player_first_goal_history_from_nhl_api(
     if not eligible_player_ids:
         return {}
 
+    try:
+        refresh_incremental_first_goal_derived_data(selected_date=selected_date, artifact_path=path)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Incremental first-goal historical update failed; continuing with cached artifact history",
+            extra={"selected_date": selected_date.isoformat(), "error": str(exc)},
+        )
+
     cached_history = _load_player_first_goal_history_from_artifact(
         selected_date=selected_date,
         eligible_player_ids=eligible_player_ids,
         path=path,
     )
+    stored_first_goal_history = load_stored_first_goal_derived_history(
+        selected_date=selected_date,
+        eligible_player_ids=eligible_player_ids,
+        artifact_path=path,
+    )
+    for player_id, stored_history in stored_first_goal_history.items():
+        current = cached_history.get(player_id) or PlayerHistoricalProduction()
+        cached_history[player_id] = PlayerHistoricalProduction(
+            season_first_goals=stored_history.season_first_goals,
+            season_games_played=current.season_games_played,
+            season_total_goals=current.season_total_goals,
+            season_total_shots=current.season_total_shots,
+            season_first_period_goals=stored_history.season_first_period_goals,
+            season_first_period_shots=current.season_first_period_shots,
+            recent_5_first_goals=current.recent_5_first_goals,
+            recent_10_first_goals=current.recent_10_first_goals,
+            recent_5_total_goals=current.recent_5_total_goals,
+            recent_10_total_goals=current.recent_10_total_goals,
+            recent_5_total_shots=current.recent_5_total_shots,
+            recent_10_total_shots=current.recent_10_total_shots,
+            recent_5_first_period_goals=current.recent_5_first_period_goals,
+            recent_10_first_period_goals=current.recent_10_first_period_goals,
+            recent_5_first_period_shots=current.recent_5_first_period_shots,
+            recent_10_first_period_shots=current.recent_10_first_period_shots,
+        )
+
     season_key = _season_key(selected_date)
     missing_player_ids = sorted(player_id for player_id in eligible_player_ids if player_id not in cached_history)
     resolved_from_memory = 0
