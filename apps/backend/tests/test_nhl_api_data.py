@@ -226,4 +226,57 @@ def test_backfill_current_regular_season_first_goal_derived_data_filters_to_regu
     assert season_store["player_first_period_goal_totals"] == {"8478402": 1.0, "8477956": 1.0}
     assert result_1["newly_processed_game_ids"] == ["2025090201"]
     assert result_2["newly_processed_game_ids"] == []
+    assert result_1["failed_game_ids"] == []
+    assert result_2["failed_game_ids"] == []
     assert sum(1 for value in pbp_fetches if "2025090201/play-by-play" in value) == 1
+
+
+def test_backfill_current_regular_season_first_goal_derived_data_continues_when_single_game_fails(
+    tmp_path: Path, capsys
+) -> None:
+    artifact = tmp_path / "projections.json"
+    artifact.write_text(json.dumps({"schema_version": 1, "projections": []}), encoding="utf-8")
+
+    def _fake_fetch_json(*, url: str, headers=None, timeout_seconds=10, opener=None):  # noqa: ANN001
+        if "/schedule/" in url and url.endswith("/2025-09-01"):
+            return {
+                "games": [
+                    {"id": 2025090101, "season": 20252026, "gameType": 2, "gameState": "OFF"},
+                    {"id": 2025090102, "season": 20252026, "gameType": 2, "gameState": "OFF"},
+                ]
+            }
+        if "/play-by-play" in url and "2025090101" in url:
+            raise TimeoutError("simulated timeout")
+        if "/play-by-play" in url and "2025090102" in url:
+            return {
+                "plays": [
+                    {
+                        "typeDescKey": "goal",
+                        "sortOrder": 10,
+                        "periodDescriptor": {"number": 1},
+                        "details": {"scoringPlayerId": 8478402},
+                    }
+                ]
+            }
+        return {"games": []}
+
+    with patch("app.services.nhl_api_data.fetch_json", side_effect=_fake_fetch_json):
+        result = backfill_current_regular_season_first_goal_derived_data(
+            selected_date=date(2025, 9, 1),
+            artifact_path=artifact,
+        )
+
+    captured = capsys.readouterr()
+    assert "Backfill schedule scan progress: scanned_dates=1 current_date=2025-09-01" in captured.out
+    assert "Backfill candidates prepared: total_candidates=2" in captured.out
+    assert "Backfill game start: 1/2 game_id=2025090101 processed=0 skipped=0 failed=0" in captured.out
+    assert "Backfill game start: 2/2 game_id=2025090102 processed=0 skipped=0 failed=1" in captured.out
+    assert "Backfill game failed: game_id=2025090101 error=simulated timeout" in captured.out
+    assert "Backfill progress: 2/2 game_id=2025090102 processed=1 skipped=0 failed=1" in captured.out
+    assert "Backfill summary: total_candidates=2 processed=1 skipped=0 failed=1" in captured.out
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    season_store = payload["historical_first_goal_tracking"]["20252026"]
+    assert season_store["processed_game_ids"] == ["2025090102"]
+    assert result["newly_processed_game_ids"] == ["2025090102"]
+    assert result["failed_game_ids"] == ["2025090101"]
