@@ -1462,3 +1462,243 @@ def test_real_mode_common_team_names_generate_rows_with_nhl_api_rosters(tmp_path
 
     assert {row.player_name for row in rows} == {"Artemi Panarin", "David Pastrnak"}
     assert all(not row.nhl_player_id.startswith("dev-") for row in rows)
+
+
+def test_single_letter_wing_positions_are_not_filtered_out_of_candidate_pool(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(artifact, [])
+    selected_date = date(2026, 3, 24)
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026032409",
+                    game_time=datetime(2026, 3, 24, 23, 0, tzinfo=timezone.utc),
+                    away_team="Boston Bruins",
+                    home_team="Tampa Bay Lightning",
+                )
+            ]
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(
+        json.dumps(
+            {
+                "players": [
+                    {"player_id": "8477956", "player_name": "David Pastrnak", "active_team_name": "Boston Bruins", "is_active_roster": True, "position_code": "R"},
+                    {"player_id": "8473419", "player_name": "Brad Marchand", "active_team_name": "Boston Bruins", "is_active_roster": True, "position_code": "L"},
+                    {"player_id": "8480801", "player_name": "Pavel Zacha", "active_team_name": "Boston Bruins", "is_active_roster": True, "position_code": "C"},
+                    {"player_id": "8480880", "player_name": "Michael Eyssimont", "active_team_name": "Tampa Bay Lightning", "is_active_roster": True, "position_code": "R"},
+                    {"player_id": "8476453", "player_name": "Andrei Vasilevskiy", "active_team_name": "Tampa Bay Lightning", "is_active_roster": True, "position_code": "G"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=ActiveRosterRepository(roster_path=roster_path),
+        history_loader=lambda _date, _ids, _path: {},
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+    names = {row.player_name for row in rows}
+
+    assert "David Pastrnak" in names
+    assert "Brad Marchand" in names
+    assert "Pavel Zacha" in names
+    assert "Andrei Vasilevskiy" not in names
+
+
+def test_candidate_pool_includes_defensemen_not_only_forwards(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(artifact, [])
+    selected_date = date(2026, 3, 24)
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026032410",
+                    game_time=datetime(2026, 3, 24, 23, 30, tzinfo=timezone.utc),
+                    away_team="Boston Bruins",
+                    home_team="NY Rangers",
+                )
+            ]
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(
+        json.dumps(
+            {
+                "players": [
+                    {"player_id": "8479323", "player_name": "Artemi Panarin", "active_team_name": "NY Rangers", "is_active_roster": True, "position_code": "LW"},
+                    {"player_id": "8478402", "player_name": "Adam Fox", "active_team_name": "NY Rangers", "is_active_roster": True, "position_code": "D"},
+                    {"player_id": "8477956", "player_name": "David Pastrnak", "active_team_name": "Boston Bruins", "is_active_roster": True, "position_code": "RW"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=ActiveRosterRepository(roster_path=roster_path),
+        history_loader=lambda _date, _ids, _path: {},
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+    names = {row.player_name for row in rows}
+
+    assert "Adam Fox" in names
+
+
+def test_nhl_api_roster_repository_drops_players_with_mismatched_active_team(monkeypatch) -> None:
+    def _fake_roster(team_abbrev: str):
+        if team_abbrev == "BOS":
+            return [
+                type("P", (), {"player_id": "8477956", "player_name": "David Pastrnak", "active_team_name": "BOS", "position_code": "R"})(),
+                type("P", (), {"player_id": "8473419", "player_name": "Brad Marchand", "active_team_name": "FLA", "position_code": "L"})(),
+            ]
+        if team_abbrev == "FLA":
+            return [
+                type("P", (), {"player_id": "8473419", "player_name": "Brad Marchand", "active_team_name": "FLA", "position_code": "L"})(),
+            ]
+        return []
+
+    monkeypatch.setattr("app.services.dev_projection_provider.fetch_team_roster_current", _fake_roster)
+
+    repository = NhlApiActiveRosterRepository()
+
+    bruins_players = {player.player_name for player in repository.active_players_for_team("Boston Bruins")}
+    panthers_players = {player.player_name for player in repository.active_players_for_team("Florida Panthers")}
+
+    assert "David Pastrnak" in bruins_players
+    assert "Brad Marchand" not in bruins_players
+    assert "Brad Marchand" in panthers_players
+
+
+def test_today_always_regenerates_and_ignores_cached_projection_rows(tmp_path) -> None:
+    selected_date = date.today()
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {
+                "date": selected_date.isoformat(),
+                "game_id": "2026032501",
+                "nhl_player_id": "stale-player",
+                "player_name": "Stale Cached Player",
+                "team_name": "Boston Bruins",
+                "active_team_name": "Boston Bruins",
+                "is_active_roster": True,
+                "model_probability": 0.19,
+            }
+        ],
+    )
+
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026032501",
+                    game_time=datetime(2026, 3, 25, 23, 0, tzinfo=timezone.utc),
+                    away_team="Boston Bruins",
+                    home_team="Florida Panthers",
+                )
+            ]
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(
+        json.dumps(
+            {
+                "players": [
+                    {"player_id": "8477956", "player_name": "David Pastrnak", "active_team_name": "Boston Bruins", "is_active_roster": True, "position_code": "R"},
+                    {"player_id": "8473419", "player_name": "Brad Marchand", "active_team_name": "Florida Panthers", "is_active_roster": True, "position_code": "L"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=ActiveRosterRepository(roster_path=roster_path),
+        history_loader=lambda _date, _ids, _path: {},
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+
+    names = {row.player_name for row in rows}
+    assert "Stale Cached Player" not in names
+    assert "David Pastrnak" in names
+    assert "Brad Marchand" in names
+
+
+def test_past_date_reuses_cached_projection_rows(tmp_path) -> None:
+    selected_date = date(2026, 3, 24)
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {
+                "date": selected_date.isoformat(),
+                "game_id": "2026032401",
+                "nhl_player_id": "cached-player",
+                "player_name": "Cached Past Player",
+                "team_name": "Boston Bruins",
+                "active_team_name": "Boston Bruins",
+                "is_active_roster": True,
+                "position_code": "RW",
+                "historical_season_total_goals": 30,
+                "historical_season_total_shots": 210,
+                "model_probability": 0.21,
+            },
+            {
+                "date": selected_date.isoformat(),
+                "game_id": "2026032401",
+                "nhl_player_id": "cached-player-2",
+                "player_name": "Cached Past Player 2",
+                "team_name": "Florida Panthers",
+                "active_team_name": "Florida Panthers",
+                "is_active_roster": True,
+                "position_code": "C",
+                "historical_season_total_goals": 24,
+                "historical_season_total_shots": 180,
+                "model_probability": 0.18,
+            },
+        ],
+    )
+    calls: list[str] = []
+
+    class _RosterRepo(ActiveRosterRepository):
+        def active_players_for_team(self, team_name: str):
+            calls.append(team_name)
+            return super().active_players_for_team(team_name)
+
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026032401",
+                    game_time=datetime(2026, 3, 24, 23, 0, tzinfo=timezone.utc),
+                    away_team="Boston Bruins",
+                    home_team="Florida Panthers",
+                )
+            ]
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(json.dumps({"players": []}), encoding="utf-8")
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=_RosterRepo(roster_path=roster_path),
+        history_loader=lambda _date, _ids, _path: {},
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+
+    assert {row.player_name for row in rows} == {"Cached Past Player", "Cached Past Player 2"}
+    assert calls == []
