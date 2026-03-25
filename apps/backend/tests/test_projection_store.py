@@ -58,6 +58,59 @@ def test_store_loads_rows_for_selected_date(tmp_path) -> None:
     assert rows[0].roster_eligibility.is_active_roster is True
 
 
+def test_store_maps_known_player_name_and_team_to_numeric_nhl_player_id(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {
+                "date": "2026-03-23",
+                "game_id": "g-1",
+                "player_id": "p-home-artemi-panarin",
+                "player_name": "Artemi Panarin",
+                "team_name": "NY Rangers",
+                "model_probability": 0.22,
+            },
+        ],
+    )
+
+    store = JsonArtifactProjectionStore(artifact)
+    provider = StoreBackedProjectionProvider(store=store)
+
+    rows = provider.fetch_player_first_goal_projections(date(2026, 3, 23))
+
+    assert len(rows) == 1
+    assert rows[0].nhl_player_id == "8479323"
+
+
+def test_store_reads_season_totals_from_alias_fields(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {
+                "date": "2026-03-23",
+                "game_id": "g-1",
+                "nhl_player_id": "8477939",
+                "player_name": "Auston Matthews",
+                "team": "Toronto Maple Leafs",
+                "season_total_goals": 54,
+                "season_first_goals": 8,
+                "model_probability": 0.27,
+            },
+        ],
+    )
+
+    store = JsonArtifactProjectionStore(artifact)
+    provider = StoreBackedProjectionProvider(store=store)
+
+    rows = provider.fetch_player_first_goal_projections(date(2026, 3, 23))
+
+    assert len(rows) == 1
+    assert rows[0].historical_production.season_total_goals == 54.0
+    assert rows[0].historical_production.season_first_goals == 8.0
+
+
 @pytest.mark.parametrize(
     ("row", "error_fragment"),
     [
@@ -180,7 +233,7 @@ def test_recommendation_routes_integrate_with_store_backed_projections(tmp_path)
 
     assert payload.projections_available is True
     assert target_game.away_top_projected_scorer is not None
-    assert target_game.away_top_projected_scorer.player_id == "p-artemi-panarin"
+    assert target_game.away_top_projected_scorer.player_id == "8479323"
 
 
 def test_attach_top_projected_scorers_preserves_games_when_projections_missing(tmp_path) -> None:
