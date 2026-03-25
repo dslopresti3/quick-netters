@@ -185,6 +185,26 @@ h1, h2, h3 { margin: 0; }
   color: #6b7280;
 }
 
+.metric-label-with-help {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.metric-help-icon {
+  font-size: 0.76rem;
+  line-height: 1;
+  color: #64748b;
+  cursor: help;
+}
+
+.metric-secondary-text {
+  margin-top: 0.2rem;
+  display: block;
+  font-size: 0.72rem;
+  color: #6b7280;
+}
+
 .metric-value-prominent {
   margin-top: 0.15rem;
   display: inline-block;
@@ -216,6 +236,16 @@ h1, h2, h3 { margin: 0; }
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.55rem;
+}
+
+.metrics-explainer summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.metrics-explainer-content code {
+  font-size: 0.8rem;
+  color: #334155;
 }
 
 @media (max-width: 760px) {

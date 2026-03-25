@@ -20,6 +20,30 @@ export default async function HomePage() {
           actionPath="/slate"
         />
       </section>
+
+      <section className="card stack-gap metrics-explainer">
+        <details>
+          <summary>How it works: betting metrics</summary>
+          <div className="stack-gap-sm metrics-explainer-content">
+            <p>
+              <strong>Model Probability</strong>: The model's estimate of a player scoring first.
+            </p>
+            <p>
+              <strong>Implied Probability</strong>: The probability implied by the sportsbook's market odds.
+            </p>
+            <p>
+              <strong>Edge</strong>: How much the model probability differs from implied probability.
+              <br />
+              <code>Edge = Model Prob − Implied Prob</code>
+            </p>
+            <p>
+              <strong>Expected Value (EV)</strong>: Estimated return per 1 unit staked.
+              <br />
+              <code>EV = (Model Prob × Payout) − (1 − Model Prob)</code>
+            </p>
+          </div>
+        </details>
+      </section>
     </main>
   );
 }
