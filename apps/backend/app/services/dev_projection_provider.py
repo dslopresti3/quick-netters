@@ -177,6 +177,9 @@ class _ProjectionTemplate:
     recent_outcome_shrinkage_games: float
     recent_process_form_cap: float
     recent_outcome_form_cap: float
+    scoring_talent_weight: float
+    missing_first_goal_penalty_base: float
+    missing_first_goal_total_goal_relief: float
     min_player_share_floor: float
 
 
@@ -199,6 +202,9 @@ _DEFAULT_TEMPLATE = _ProjectionTemplate(
     recent_outcome_shrinkage_games=36.0,
     recent_process_form_cap=2.0,
     recent_outcome_form_cap=0.8,
+    scoring_talent_weight=0.035,
+    missing_first_goal_penalty_base=0.72,
+    missing_first_goal_total_goal_relief=0.02,
     min_player_share_floor=0.001,
 )
 _GOALIE_POSITION_CODES = {"G", "GOALIE", "GK"}
@@ -393,6 +399,7 @@ def _eligible_player_ids_from_pool(eligible_player_pool: list[_EligiblePlayerCan
 
 @dataclass(frozen=True)
 class _PlayerModelFeatures:
+    games_played: float
     first_goals_per_game: float
     goals_per_game: float
     first_period_goals_per_game: float
@@ -1179,6 +1186,7 @@ def _player_model_features(player_historical: PlayerHistoricalProduction) -> _Pl
     )
     offensive_tier_multiplier = min(1.85, max(0.45, 0.55 + (1.05 * offensive_index)))
     return _PlayerModelFeatures(
+        games_played=games_played,
         first_goals_per_game=first_goals_per_game,
         goals_per_game=goals_per_game,
         first_period_goals_per_game=first_period_goals_per_game,
@@ -1203,8 +1211,26 @@ def _player_first_goal_score(player_features: _PlayerModelFeatures, template: _P
     outcome_weight = player_features.stability_score / max(template.recent_outcome_shrinkage_games / 60.0, 1.0)
     recent_process_adjustment = template.player_recent_process_weight * process_weight * player_features.recent_process_form
     recent_outcome_adjustment = template.player_recent_outcome_weight * outcome_weight * player_features.recent_outcome_form
+    season_first_goals = player_features.first_goals_per_game * player_features.games_played
+    season_total_goals = player_features.goals_per_game * player_features.games_played
+    scoring_talent_index = (2.0 * season_first_goals) + (0.7 * season_total_goals)
+    scoring_talent_multiplier = min(1.75, max(0.4, 0.55 + (template.scoring_talent_weight * scoring_talent_index)))
+    first_goal_presence_multiplier = 1.0
+    if season_first_goals <= 0:
+        first_goal_presence_multiplier = min(
+            1.0,
+            max(
+                0.55,
+                template.missing_first_goal_penalty_base
+                + (template.missing_first_goal_total_goal_relief * min(season_total_goals, 14.0)),
+            ),
+        )
     stable_component = stable_baseline * player_features.offensive_tier_multiplier
-    adjusted = stable_component + recent_process_adjustment + recent_outcome_adjustment
+    adjusted = (
+        stable_component * scoring_talent_multiplier * first_goal_presence_multiplier
+        + recent_process_adjustment
+        + recent_outcome_adjustment
+    )
     return max(adjusted, template.min_player_share_floor)
 
 
