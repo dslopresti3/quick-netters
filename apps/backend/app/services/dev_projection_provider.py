@@ -751,7 +751,13 @@ def _load_player_first_goal_history_from_artifact(
             )
         )
         games_played = _as_float(row.get("historical_season_games_played"))
-        total_goals = _as_float(row.get("historical_season_total_goals"))
+        total_goals = _as_float(
+            _coalesce(
+                row.get("historical_season_total_goals"),
+                row.get("season_total_goals"),
+                row.get("goals_this_year"),
+            )
+        )
         total_shots = _as_float(row.get("historical_season_total_shots"))
         first_period_goals = _as_float(row.get("historical_season_first_period_goals"))
         first_period_shots = _as_float(row.get("historical_season_first_period_shots"))
@@ -957,7 +963,7 @@ def load_player_first_goal_history_from_nhl_api(
         cached_history[player_id] = PlayerHistoricalProduction(
             season_first_goals=stored_history.season_first_goals,
             season_games_played=current.season_games_played,
-            season_total_goals=current.season_total_goals,
+            season_total_goals=_coalesce(stored_history.season_total_goals, current.season_total_goals),
             season_total_shots=current.season_total_shots,
             season_first_period_goals=stored_history.season_first_period_goals,
             season_first_period_shots=current.season_first_period_shots,
@@ -974,13 +980,21 @@ def load_player_first_goal_history_from_nhl_api(
         )
 
     season_key = _season_key(selected_date)
-    missing_player_ids = sorted(player_id for player_id in eligible_player_ids if player_id not in cached_history)
+    missing_player_ids = sorted(
+        player_id
+        for player_id in eligible_player_ids
+        if player_id not in cached_history
+        or cached_history[player_id].season_total_goals is None
+    )
     resolved_from_memory = 0
     for player_id in missing_player_ids[:]:
         cached = _PLAYER_HISTORY_CACHE_BY_PLAYER_SEASON.get((player_id, season_key))
         if cached is None:
             continue
-        cached_history[player_id] = cached
+        cached_history[player_id] = _merge_history_preserving_first_goal_derived_data(
+            current=cached_history.get(player_id),
+            incoming=cached,
+        )
         missing_player_ids.remove(player_id)
         resolved_from_memory += 1
     if resolved_from_memory:
@@ -1018,8 +1032,12 @@ def load_player_first_goal_history_from_nhl_api(
     for player_id in missing_player_ids[:fetch_budget]:
         try:
             production = fetch_player_first_goal_history(player_id=player_id, selected_date=selected_date)
-            cached_history[player_id] = production
-            _PLAYER_HISTORY_CACHE_BY_PLAYER_SEASON[(player_id, season_key)] = production
+            merged = _merge_history_preserving_first_goal_derived_data(
+                current=cached_history.get(player_id),
+                incoming=production,
+            )
+            cached_history[player_id] = merged
+            _PLAYER_HISTORY_CACHE_BY_PLAYER_SEASON[(player_id, season_key)] = merged
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Live NHL player history fetch failed; continuing without this player history",
@@ -1042,6 +1060,32 @@ def load_player_first_goal_history_from_nhl_api(
         )
 
     return cached_history
+
+
+def _merge_history_preserving_first_goal_derived_data(
+    current: PlayerHistoricalProduction | None,
+    incoming: PlayerHistoricalProduction,
+) -> PlayerHistoricalProduction:
+    if current is None:
+        return incoming
+    return PlayerHistoricalProduction(
+        season_first_goals=_coalesce(current.season_first_goals, incoming.season_first_goals),
+        season_games_played=_coalesce(incoming.season_games_played, current.season_games_played),
+        season_total_goals=_coalesce(incoming.season_total_goals, current.season_total_goals),
+        season_total_shots=_coalesce(incoming.season_total_shots, current.season_total_shots),
+        season_first_period_goals=_coalesce(current.season_first_period_goals, incoming.season_first_period_goals),
+        season_first_period_shots=_coalesce(incoming.season_first_period_shots, current.season_first_period_shots),
+        recent_5_first_goals=_coalesce(incoming.recent_5_first_goals, current.recent_5_first_goals),
+        recent_10_first_goals=_coalesce(incoming.recent_10_first_goals, current.recent_10_first_goals),
+        recent_5_total_goals=_coalesce(incoming.recent_5_total_goals, current.recent_5_total_goals),
+        recent_10_total_goals=_coalesce(incoming.recent_10_total_goals, current.recent_10_total_goals),
+        recent_5_total_shots=_coalesce(incoming.recent_5_total_shots, current.recent_5_total_shots),
+        recent_10_total_shots=_coalesce(incoming.recent_10_total_shots, current.recent_10_total_shots),
+        recent_5_first_period_goals=_coalesce(incoming.recent_5_first_period_goals, current.recent_5_first_period_goals),
+        recent_10_first_period_goals=_coalesce(incoming.recent_10_first_period_goals, current.recent_10_first_period_goals),
+        recent_5_first_period_shots=_coalesce(incoming.recent_5_first_period_shots, current.recent_5_first_period_shots),
+        recent_10_first_period_shots=_coalesce(incoming.recent_10_first_period_shots, current.recent_10_first_period_shots),
+    )
 
 
 def _history_value(value: float | None) -> float:
