@@ -166,6 +166,7 @@ def test_daily_recommendations_route_uses_injected_recommendation_dependencies()
     assert payload.recommendations[0].game_id == "g-custom-vs-test"
     assert payload.recommendations[0].player_id == "p-custom"
     assert payload.recommendations[0].team_name == "Custom Home"
+    assert payload.recommendations[0].implied_probability is not None
 
 
 def test_game_recommendations_route_uses_injected_registry() -> None:

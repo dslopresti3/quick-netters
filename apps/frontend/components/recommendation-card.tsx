@@ -5,12 +5,28 @@ type RecommendationCardProps = {
   rank?: number;
 };
 
+type MetricLabelProps = {
+  label: string;
+  tooltip: string;
+};
+
 function formatSignedOdds(value: number): string {
   return value > 0 ? `+${value}` : `${value}`;
 }
 
 function formatPercent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
+}
+
+function MetricLabel({ label, tooltip }: MetricLabelProps) {
+  return (
+    <span className="metric-label metric-label-with-help">
+      {label}
+      <span className="metric-help-icon" role="img" aria-label={`${label} info`} title={tooltip}>
+        ⓘ
+      </span>
+    </span>
+  );
 }
 
 export function RecommendationCard({ recommendation, rank }: RecommendationCardProps) {
@@ -30,16 +46,28 @@ export function RecommendationCard({ recommendation, rank }: RecommendationCardP
         <p className="metrics-heading">Primary betting metrics</p>
         <div className="primary-metrics-grid">
           <div className="primary-metric">
-            <span className="metric-label">Model probability</span>
+            <MetricLabel
+              label="Model probability"
+              tooltip="Your model's estimated chance this player scores the first goal. Higher values indicate a stronger model signal."
+            />
             <strong className="metric-value-prominent">{formatPercent(recommendation.model_probability)}</strong>
           </div>
           <div className="primary-metric">
-            <span className="metric-label">Fair odds</span>
+            <MetricLabel
+              label="Fair odds"
+              tooltip="Odds implied by the model probability. Compare this to market odds to spot potential value."
+            />
             <strong className="metric-value-prominent">{formatSignedOdds(recommendation.fair_odds)}</strong>
           </div>
           <div className="primary-metric">
-            <span className="metric-label">Market odds</span>
+            <MetricLabel
+              label="Market odds"
+              tooltip="The sportsbook's current price for this pick. Used to derive implied probability and EV."
+            />
             <strong className="metric-value-prominent">{formatSignedOdds(recommendation.market_odds)}</strong>
+            <span className="metric-secondary-text">
+              Implied: {recommendation.implied_probability !== undefined ? formatPercent(recommendation.implied_probability) : "-"}
+            </span>
           </div>
         </div>
       </section>
@@ -48,11 +76,17 @@ export function RecommendationCard({ recommendation, rank }: RecommendationCardP
         <p className="metrics-heading">Value metrics</p>
         <div className="value-chip-row">
           <div className="metric-chip metric-chip-value">
-            <span className="metric-label">Edge</span>
+            <MetricLabel
+              label="Edge"
+              tooltip="Difference between model probability and implied probability. Positive edge suggests potential value."
+            />
             <strong>{formatPercent(recommendation.edge)}</strong>
           </div>
           <div className="metric-chip metric-chip-value">
-            <span className="metric-label">EV</span>
+            <MetricLabel
+              label="EV"
+              tooltip="Expected value per unit stake from model probability and market payout. Positive EV indicates a profitable bet over time."
+            />
             <strong>{formatPercent(recommendation.ev)}</strong>
           </div>
         </div>
