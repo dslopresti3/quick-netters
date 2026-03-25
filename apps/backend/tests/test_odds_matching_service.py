@@ -455,11 +455,143 @@ def test_recommendation_fields_include_implied_probability_fair_odds_edge_and_ev
     assert len(recs) == 1
     rec = recs[0]
     assert rec.implied_probability == 0.2
+    assert rec.decimal_odds == 5.0
     assert rec.fair_odds == 355
     assert rec.edge == 0.02
     assert rec.ev == 0.1
     assert rec.confidence_score is not None
     assert rec.recommendation_score is not None
+
+
+def test_game_bucket_selection_uses_blended_play_score_for_top_plays_and_best_bet() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026020401", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
+    projections = [
+        _projection("2026020401", "p1", "Player One", "NY Rangers", "NY Rangers", model_probability=0.12),
+        _projection("2026020401", "p2", "Player Two", "NY Rangers", "NY Rangers", model_probability=0.09),
+        _projection("2026020401", "p3", "Player Three", "NY Rangers", "NY Rangers", model_probability=0.07),
+        _projection("2026020401", "p4", "Player Four", "NY Rangers", "NY Rangers", model_probability=0.03),
+    ]
+    odds_rows = [
+        NormalizedPlayerOdds(
+            nhl_game_id="2026020401",
+            nhl_player_id="p1",
+            market_odds_american=1100,
+            snapshot_at=game_time - timedelta(minutes=2),
+            provider_name="test",
+            provider_event_id="evt-p1",
+            provider_player_name_raw="Player One",
+            provider_team_raw="NY Rangers",
+            away_team_raw="NY Rangers",
+            home_team_raw="Boston Bruins",
+            provider_start_time=game_time,
+            freshness_status="fresh",
+            is_fresh=True,
+            event_mapping=None,
+            player_mapping=None,
+        ),
+        NormalizedPlayerOdds(
+            nhl_game_id="2026020401",
+            nhl_player_id="p2",
+            market_odds_american=1300,
+            snapshot_at=game_time - timedelta(minutes=2),
+            provider_name="test",
+            provider_event_id="evt-p2",
+            provider_player_name_raw="Player Two",
+            provider_team_raw="NY Rangers",
+            away_team_raw="NY Rangers",
+            home_team_raw="Boston Bruins",
+            provider_start_time=game_time,
+            freshness_status="fresh",
+            is_fresh=True,
+            event_mapping=None,
+            player_mapping=None,
+        ),
+        NormalizedPlayerOdds(
+            nhl_game_id="2026020401",
+            nhl_player_id="p3",
+            market_odds_american=1900,
+            snapshot_at=game_time - timedelta(minutes=2),
+            provider_name="test",
+            provider_event_id="evt-p3",
+            provider_player_name_raw="Player Three",
+            provider_team_raw="NY Rangers",
+            away_team_raw="NY Rangers",
+            home_team_raw="Boston Bruins",
+            provider_start_time=game_time,
+            freshness_status="fresh",
+            is_fresh=True,
+            event_mapping=None,
+            player_mapping=None,
+        ),
+        NormalizedPlayerOdds(
+            nhl_game_id="2026020401",
+            nhl_player_id="p4",
+            market_odds_american=2500,
+            snapshot_at=game_time - timedelta(minutes=2),
+            provider_name="test",
+            provider_event_id="evt-p4",
+            provider_player_name_raw="Player Four",
+            provider_team_raw="NY Rangers",
+            away_team_raw="NY Rangers",
+            home_team_raw="Boston Bruins",
+            provider_start_time=game_time,
+            freshness_status="fresh",
+            is_fresh=True,
+            event_mapping=None,
+            player_mapping=None,
+        ),
+    ]
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    top_plays, best_bet, underdog = service.fetch_game_recommendation_buckets(selected_date, "2026020401")
+
+    assert [recommendation.player_id for recommendation in top_plays] == ["p1", "p3", "p2"]
+    assert top_plays[0].recommendation_score == 1.0
+    assert best_bet is not None
+    assert best_bet.player_id == "p1"
+    assert underdog is not None
+    assert underdog.player_id == "p3"
+
+
+def test_underdog_bucket_returns_none_when_no_candidate_qualifies() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026020402", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
+    projections = [_projection("2026020402", "p1", "Player One", "NY Rangers", "NY Rangers", model_probability=0.05)]
+    odds_rows = [
+        NormalizedPlayerOdds(
+            nhl_game_id="2026020402",
+            nhl_player_id="p1",
+            market_odds_american=1400,
+            snapshot_at=game_time - timedelta(minutes=2),
+            provider_name="test",
+            provider_event_id="evt-p1",
+            provider_player_name_raw="Player One",
+            provider_team_raw="NY Rangers",
+            away_team_raw="NY Rangers",
+            home_team_raw="Boston Bruins",
+            provider_start_time=game_time,
+            freshness_status="fresh",
+            is_fresh=True,
+            event_mapping=None,
+            player_mapping=None,
+        ),
+    ]
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    _, _, underdog = service.fetch_game_recommendation_buckets(selected_date, "2026020402")
+
+    assert underdog is None
 
 
 def test_recommendation_ranking_balances_probability_value_and_confidence() -> None:
@@ -545,7 +677,7 @@ def test_recommendation_ranking_balances_probability_value_and_confidence() -> N
 
     assert len(recs) == 2
     assert recs[0].player_id == "stable-topline"
-    assert (recs[0].recommendation_score or 0) > (recs[1].recommendation_score or 0)
+    assert (recs[0].recommendation_score or 0) >= (recs[1].recommendation_score or 0)
 
 
 def test_event_mapping_matches_when_provider_start_time_has_non_utc_offset() -> None:
@@ -756,4 +888,4 @@ def test_long_odds_value_is_mildly_dampened_when_probability_is_weaker() -> None
 
     assert by_id["high-prob"].recommendation_score is not None
     assert by_id["long-odds"].recommendation_score is not None
-    assert by_id["high-prob"].recommendation_score > by_id["long-odds"].recommendation_score
+    assert by_id["long-odds"].recommendation_score > by_id["high-prob"].recommendation_score

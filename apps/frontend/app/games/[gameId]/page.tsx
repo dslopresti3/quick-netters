@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { GameTopThreeStars } from "../../../components/game-top-three-stars";
+import { RecommendationCard } from "../../../components/recommendation-card";
 import { fetchDateAvailability, fetchGameRecommendations, getCurrentUtcDate, resolveDisplayTimezone } from "../../../lib/api";
 
 type GameDetailPageProps = {
@@ -65,7 +65,9 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
     );
   }
 
-  const topBets = gameResponse.recommendations.slice(0, 3);
+  const topPlays = gameResponse.top_plays ?? gameResponse.recommendations.slice(0, 3);
+  const bestBet = gameResponse.best_bet;
+  const underdogPlay = gameResponse.underdog_value_play;
 
   return (
     <main className="page stack-gap-lg">
@@ -117,17 +119,44 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
       </section>
 
       <section className="card stack-gap">
-        <h2>Top 3 value picks for this game</h2>
+        <h2>Top 3 plays for this game</h2>
+        <p className="helper-text">Best balanced plays using a blended probability + betting value ranking.</p>
         {!availability.projections_available ? (
           <p className="empty-state">This game is scheduled, but projections are not available yet.</p>
         ) : !availability.odds_available ? (
           <p className="empty-state">Projections are available, but market odds are not posted yet.</p>
-        ) : topBets.length === 0 ? (
-          <p className="empty-state">No value picks available yet for this game.</p>
+        ) : topPlays.length === 0 ? (
+          <p className="empty-state">No balanced Top 3 plays are qualified yet for this game.</p>
         ) : (
-          <GameTopThreeStars picks={topBets} />
+          <div className="recommendation-grid">
+            {topPlays.map((pick, index) => (
+              <RecommendationCard key={pick.player_id} recommendation={pick} rank={index + 1} />
+            ))}
+          </div>
         )}
       </section>
+
+      <section className="card stack-gap featured-best-bet">
+        <h2>Best bet</h2>
+        <p className="helper-text">The single strongest overall play from the blended probability + value model.</p>
+        {!availability.projections_available ? (
+          <p className="empty-state">This game is scheduled, but projections are not available yet.</p>
+        ) : !availability.odds_available ? (
+          <p className="empty-state">Projections are available, but market odds are not posted yet.</p>
+        ) : !bestBet ? (
+          <p className="empty-state">No best bet is qualified for this game yet.</p>
+        ) : (
+          <RecommendationCard recommendation={bestBet} />
+        )}
+      </section>
+
+      {underdogPlay && (
+        <section className="card stack-gap featured-underdog">
+          <h2>Underdog value play</h2>
+          <p className="helper-text">A higher-risk, higher-payout option with positive EV and edge.</p>
+          <RecommendationCard recommendation={underdogPlay} />
+        </section>
+      )}
     </main>
   );
 }

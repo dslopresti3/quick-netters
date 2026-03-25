@@ -36,6 +36,7 @@ export function RecommendationCard({ recommendation, rank }: RecommendationCardP
         <div>
           {typeof rank === "number" && <p className="recommendation-rank">#{rank}</p>}
           <h3 className="recommendation-player-name">{recommendation.player_name}</h3>
+          <p className="helper-text">{recommendation.player_team ?? recommendation.team_name ?? `${recommendation.away_team} / ${recommendation.home_team}`}</p>
         </div>
         {recommendation.confidence_tag && (
           <span className={`confidence-badge confidence-${recommendation.confidence_tag}`}>{recommendation.confidence_tag}</span>
