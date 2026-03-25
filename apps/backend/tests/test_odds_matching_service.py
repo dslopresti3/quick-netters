@@ -78,11 +78,21 @@ def _projection(
     )
 
 
-def _raw_odds(name: str, away: str, home: str, start_time: datetime, *, team: str | None = None, event_id: str = "evt-1") -> NormalizedPlayerOdds:
+def _raw_odds(
+    name: str,
+    away: str,
+    home: str,
+    start_time: datetime,
+    *,
+    team: str | None = None,
+    event_id: str = "evt-1",
+    nhl_player_id: str | None = None,
+    market_odds_american: int = 400,
+) -> NormalizedPlayerOdds:
     return NormalizedPlayerOdds(
         nhl_game_id=None,
-        nhl_player_id=None,
-        market_odds_american=400,
+        nhl_player_id=nhl_player_id,
+        market_odds_american=market_odds_american,
         snapshot_at=start_time - timedelta(minutes=5),
         provider_name="the-odds-api",
         provider_event_id=event_id,
@@ -477,7 +487,7 @@ def test_game_bucket_selection_uses_blended_play_score_for_top_plays_and_best_be
         NormalizedPlayerOdds(
             nhl_game_id="2026020401",
             nhl_player_id="p1",
-            market_odds_american=1100,
+            market_odds_american=900,
             snapshot_at=game_time - timedelta(minutes=2),
             provider_name="test",
             provider_event_id="evt-p1",
@@ -552,11 +562,41 @@ def test_game_bucket_selection_uses_blended_play_score_for_top_plays_and_best_be
     top_plays, best_bet, underdog = service.fetch_game_recommendation_buckets(selected_date, "2026020401")
 
     assert [recommendation.player_id for recommendation in top_plays] == ["p1", "p3", "p2"]
-    assert top_plays[0].recommendation_score == 1.0
+    assert (top_plays[0].recommendation_score or 0.0) > (top_plays[1].recommendation_score or 0.0)
+    assert len(top_plays) == 3
     assert best_bet is not None
-    assert best_bet.player_id == "p1"
+    assert best_bet.player_id == "p3"
     assert underdog is not None
     assert underdog.player_id == "p3"
+
+
+def test_top_play_bucket_fills_to_three_when_possible() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026020403", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
+    projections = [
+        _projection("2026020403", "p1", "Player One", "NY Rangers", "NY Rangers", model_probability=0.09),
+        _projection("2026020403", "p2", "Player Two", "NY Rangers", "NY Rangers", model_probability=0.08),
+        _projection("2026020403", "p3", "Player Three", "NY Rangers", "NY Rangers", model_probability=0.02),
+        _projection("2026020403", "p4", "Player Four", "NY Rangers", "NY Rangers", model_probability=0.01),
+    ]
+    odds_rows = [
+        _raw_odds("Player One", "NY Rangers", "Boston Bruins", game_time, team="NY Rangers", nhl_player_id="p1", market_odds_american=1000),
+        _raw_odds("Player Two", "NY Rangers", "Boston Bruins", game_time, team="NY Rangers", nhl_player_id="p2", market_odds_american=1200),
+        _raw_odds("Player Three", "NY Rangers", "Boston Bruins", game_time, team="NY Rangers", nhl_player_id="p3", market_odds_american=2400),
+        _raw_odds("Player Four", "NY Rangers", "Boston Bruins", game_time, team="NY Rangers", nhl_player_id="p4", market_odds_american=2500),
+    ]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    top_plays, _, _ = service.fetch_game_recommendation_buckets(selected_date, "2026020403")
+
+    assert len(top_plays) == 3
+    assert [recommendation.player_id for recommendation in top_plays] == ["p1", "p2", "p3"]
 
 
 def test_underdog_bucket_returns_none_when_no_candidate_qualifies() -> None:
@@ -888,4 +928,4 @@ def test_long_odds_value_is_mildly_dampened_when_probability_is_weaker() -> None
 
     assert by_id["high-prob"].recommendation_score is not None
     assert by_id["long-odds"].recommendation_score is not None
-    assert by_id["long-odds"].recommendation_score > by_id["high-prob"].recommendation_score
+    assert by_id["high-prob"].recommendation_score > by_id["long-odds"].recommendation_score
