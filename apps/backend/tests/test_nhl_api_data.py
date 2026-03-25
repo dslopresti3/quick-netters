@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.services.nhl_api_data import (
+    backfill_current_regular_season_first_goal_derived_data,
     fetch_player_first_goal_history,
     fetch_team_roster_current,
     load_stored_first_goal_derived_history,
@@ -151,3 +152,78 @@ def test_load_stored_first_goal_derived_history_returns_player_history(tmp_path:
     assert history["8477956"].season_first_goals is None
     assert history["8477956"].season_first_period_goals == 1.0
     assert "8471234" not in history
+
+
+def test_backfill_current_regular_season_first_goal_derived_data_filters_to_regular_season_and_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    artifact = tmp_path / "projections.json"
+    artifact.write_text(json.dumps({"schema_version": 1, "projections": []}), encoding="utf-8")
+
+    pbp_fetches: list[str] = []
+
+    def _fake_fetch_json(*, url: str, headers=None, timeout_seconds=10, opener=None):  # noqa: ANN001
+        if "/schedule/" in url:
+            if url.endswith("/2025-09-01"):
+                return {
+                    "games": [
+                        {"id": 2025090101, "season": 20252026, "gameType": 1, "gameState": "OFF"},
+                    ]
+                }
+            if url.endswith("/2025-09-02"):
+                return {
+                    "games": [
+                        {"id": 2025090201, "season": 20252026, "gameType": 2, "gameState": "OFF"},
+                    ]
+                }
+            if url.endswith("/2025-09-03"):
+                return {
+                    "games": [
+                        {"id": 2025090301, "season": 20252026, "gameType": 3, "gameState": "OFF"},
+                    ]
+                }
+            if url.endswith("/2025-09-04"):
+                return {
+                    "games": [
+                        {"id": 2025090401, "season": 20242025, "gameType": 2, "gameState": "OFF"},
+                    ]
+                }
+            return {"games": []}
+        if "/play-by-play" in url:
+            pbp_fetches.append(url)
+            return {
+                "plays": [
+                    {
+                        "typeDescKey": "goal",
+                        "sortOrder": 10,
+                        "periodDescriptor": {"number": 1},
+                        "details": {"scoringPlayerId": 8478402},
+                    },
+                    {
+                        "typeDescKey": "goal",
+                        "sortOrder": 20,
+                        "periodDescriptor": {"number": 1},
+                        "details": {"scoringPlayerId": 8477956},
+                    },
+                ]
+            }
+        return {"games": []}
+
+    with patch("app.services.nhl_api_data.fetch_json", side_effect=_fake_fetch_json):
+        result_1 = backfill_current_regular_season_first_goal_derived_data(
+            selected_date=date(2025, 9, 4),
+            artifact_path=artifact,
+        )
+        result_2 = backfill_current_regular_season_first_goal_derived_data(
+            selected_date=date(2025, 9, 4),
+            artifact_path=artifact,
+        )
+
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    season_store = payload["historical_first_goal_tracking"]["20252026"]
+    assert season_store["processed_game_ids"] == ["2025090201"]
+    assert season_store["player_first_goal_totals"] == {"8478402": 1.0}
+    assert season_store["player_first_period_goal_totals"] == {"8478402": 1.0, "8477956": 1.0}
+    assert result_1["newly_processed_game_ids"] == ["2025090201"]
+    assert result_2["newly_processed_game_ids"] == []
+    assert sum(1 for value in pbp_fetches if "2025090201/play-by-play" in value) == 1

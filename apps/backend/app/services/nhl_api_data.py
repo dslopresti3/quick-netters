@@ -202,6 +202,69 @@ def refresh_incremental_first_goal_derived_data(selected_date: date, artifact_pa
     artifact_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
+def backfill_current_regular_season_first_goal_derived_data(selected_date: date, artifact_path: Path) -> dict[str, Any]:
+    payload = _load_projection_artifact_payload(artifact_path)
+    season = _season_from_date(selected_date)
+    store = _get_or_create_first_goal_store(payload, season=season)
+    processed_game_ids_raw = store.get("processed_game_ids")
+    if not isinstance(processed_game_ids_raw, list):
+        processed_game_ids: set[str] = set()
+    else:
+        processed_game_ids = {str(game_id).strip() for game_id in processed_game_ids_raw if str(game_id).strip()}
+
+    regular_season_filter = "gameState in {FINAL, OFF} AND gameType == 2 AND season == active season key"
+    season_start = date(int(season[:4]), 9, 1)
+    season_end = selected_date
+    scanned_dates = 0
+    scanned_games = 0
+    newly_processed: list[str] = []
+    target_date = season_start
+    while target_date <= season_end:
+        scanned_dates += 1
+        schedule_payload = fetch_json(
+            url=f"{NHL_WEB_BASE}/schedule/{target_date.isoformat()}",
+            timeout_seconds=NHL_SCHEDULE_TIMEOUT_SECONDS,
+        )
+        for game in _extract_schedule_games(schedule_payload):
+            scanned_games += 1
+            if not _is_regular_season_game(game):
+                continue
+            if not _is_game_in_season(game, season):
+                continue
+            if not _is_completed_game(game):
+                continue
+            game_id = str(game.get("id", "")).strip()
+            if not game_id or game_id in processed_game_ids:
+                continue
+            pbp_payload = fetch_json(
+                url=f"{NHL_WEB_BASE}/gamecenter/{game_id}/play-by-play",
+                timeout_seconds=NHL_PLAY_BY_PLAY_TIMEOUT_SECONDS,
+            )
+            first_goal_scorer, first_period_scorers = _extract_first_goal_scorers_from_play_by_play(pbp_payload)
+            _increment_player_counter(store, "player_first_goal_totals", first_goal_scorer)
+            for scorer in first_period_scorers:
+                _increment_player_counter(store, "player_first_period_goal_totals", scorer)
+            processed_game_ids.add(game_id)
+            newly_processed.append(game_id)
+        target_date += timedelta(days=1)
+
+    store["processed_game_ids"] = sorted(processed_game_ids)
+    store["last_updated_on"] = selected_date.isoformat()
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return {
+        "season": season,
+        "season_start": season_start.isoformat(),
+        "season_end": season_end.isoformat(),
+        "regular_season_filter": regular_season_filter,
+        "scanned_dates": scanned_dates,
+        "scanned_games": scanned_games,
+        "newly_processed_game_ids": sorted(newly_processed),
+        "newly_processed_count": len(newly_processed),
+        "processed_game_ids_count": len(processed_game_ids),
+    }
+
+
 def load_stored_first_goal_derived_history(
     *,
     selected_date: date,
@@ -372,6 +435,35 @@ def _extract_schedule_games(schedule_payload: dict[str, Any]) -> list[dict[str, 
 def _is_completed_game(game: dict[str, Any]) -> bool:
     state = str(game.get("gameState", "")).strip().upper()
     return state in {"FINAL", "OFF"}
+
+
+def _is_regular_season_game(game: dict[str, Any]) -> bool:
+    for key in ("gameType", "gameTypeId"):
+        raw = game.get(key)
+        if isinstance(raw, bool):
+            continue
+        if isinstance(raw, int):
+            return raw == 2
+        if isinstance(raw, str):
+            normalized = raw.strip().upper()
+            if normalized.isdigit():
+                return int(normalized) == 2
+            return normalized in {"R", "REG", "REGULAR", "REGULAR_SEASON"}
+    return False
+
+
+def _is_game_in_season(game: dict[str, Any], season: str) -> bool:
+    for key in ("season", "seasonId"):
+        raw = game.get(key)
+        if isinstance(raw, bool):
+            continue
+        if isinstance(raw, int):
+            return str(raw) == season
+        if isinstance(raw, str):
+            normalized = raw.strip()
+            if normalized:
+                return normalized == season
+    return True
 
 
 def _extract_first_goal_scorers_from_play_by_play(payload: dict[str, Any]) -> tuple[str | None, list[str]]:
