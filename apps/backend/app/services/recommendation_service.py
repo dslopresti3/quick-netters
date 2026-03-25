@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, datetime, timezone
 import logging
 import os
@@ -34,6 +35,14 @@ _SCORE_WEIGHTS = {
     "confidence": 0.20,
 }
 
+TOP_PLAY_MIN_ODDS = 1000
+TOP_PLAY_MAX_ODDS = 2500
+TOP_PLAY_MIN_MODEL_PROBABILITY = 0.03
+
+UNDERDOG_MIN_ODDS = 1800
+UNDERDOG_MAX_ODDS = 4000
+UNDERDOG_MIN_MODEL_PROBABILITY = 0.025
+
 
 class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
     """Build value recommendations by comparing model probabilities against market odds."""
@@ -50,9 +59,18 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         return recommendations[:3]
 
     def fetch_for_game(self, selected_date: date, game_id: str) -> list[Recommendation]:
-        recommendations = self._build_ranked_recommendations(selected_date)
-        game_recommendations = [recommendation for recommendation in recommendations if recommendation.game_id == game_id]
-        return game_recommendations[:3]
+        top_plays, _, _ = self.fetch_game_recommendation_buckets(selected_date, game_id)
+        return top_plays
+
+    def fetch_game_recommendation_buckets(
+        self,
+        selected_date: date,
+        game_id: str,
+    ) -> tuple[list[Recommendation], Recommendation | None, Recommendation | None]:
+        game_recommendations = [recommendation for recommendation in self._build_ranked_recommendations(selected_date) if recommendation.game_id == game_id]
+        top_plays, best_bet = _select_top_play_bucket(game_recommendations)
+        underdog = _select_underdog_bucket(game_recommendations, best_bet=best_bet)
+        return top_plays, best_bet, underdog
 
     def projections_available(self, selected_date: date) -> bool:
         games = self._schedule_provider.fetch(selected_date)
@@ -193,26 +211,18 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
                 continue
 
             implied_probability = american_to_implied_probability(odds_snapshot.market_odds_american)
+            decimal_odds = _american_to_decimal_odds(odds_snapshot.market_odds_american)
             fair_odds = fair_american_odds(projection.model_probability)
             ev = expected_value_per_unit(projection.model_probability, odds_snapshot.market_odds_american)
 
-            if implied_probability is None or fair_odds is None or ev is None:
+            if implied_probability is None or decimal_odds is None or fair_odds is None or ev is None:
                 continue
 
             edge = projection.model_probability - implied_probability
-            if edge <= 0:
-                continue
 
             confidence_score = _confidence_score(
                 projection=projection,
                 market_odds=odds_snapshot.market_odds_american,
-            )
-            recommendation_score = _recommendation_score(
-                probability=projection.model_probability,
-                edge=edge,
-                ev=ev,
-                market_odds=odds_snapshot.market_odds_american,
-                confidence_score=confidence_score,
             )
 
             recommendations.append(
@@ -228,10 +238,11 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
                     model_probability=round(projection.model_probability, 4),
                     fair_odds=fair_odds,
                     market_odds=odds_snapshot.market_odds_american,
+                    decimal_odds=round(decimal_odds, 4),
                     edge=round(edge, 4),
                     ev=round(ev, 4),
                     confidence_score=round(confidence_score, 4),
-                    recommendation_score=round(recommendation_score, 4),
+                    recommendation_score=None,
                     model_debug=(
                         _build_model_debug_payload(
                             projection=projection,
@@ -239,7 +250,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
                             edge=edge,
                             ev=ev,
                             confidence_score=confidence_score,
-                            recommendation_score=recommendation_score,
+                            recommendation_score=0.0,
                         )
                         if _debug_transparency_enabled()
                         else None
@@ -252,11 +263,19 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
                 )
             )
 
+        grouped_by_game: dict[str, list[Recommendation]] = defaultdict(list)
+        for recommendation in recommendations:
+            grouped_by_game[recommendation.game_id].append(recommendation)
+
+        for game_recommendations in grouped_by_game.values():
+            _attach_play_scores(game_recommendations)
+
         return sorted(
             recommendations,
             key=lambda rec: (
                 rec.recommendation_score or 0.0,
                 rec.model_probability,
+                rec.edge,
                 rec.ev,
             ),
             reverse=True,
@@ -584,6 +603,123 @@ def _latest_snapshot_for_player(
     if not candidates:
         return None
     return max(candidates, key=lambda snapshot: snapshot.snapshot_at)
+
+
+def _american_to_decimal_odds(american_odds: int) -> float | None:
+    if american_odds > 0:
+        return 1 + (american_odds / 100)
+    if american_odds < 0:
+        return 1 + (100 / abs(american_odds))
+    return None
+
+
+def _min_max_normalize(value: float, min_value: float, max_value: float) -> float:
+    if max_value == min_value:
+        return 0.5
+    return (value - min_value) / (max_value - min_value)
+
+
+def _top_play_eligible(recommendation: Recommendation) -> bool:
+    return (
+        recommendation.ev > 0
+        and recommendation.edge > 0
+        and recommendation.model_probability >= TOP_PLAY_MIN_MODEL_PROBABILITY
+        and recommendation.market_odds >= TOP_PLAY_MIN_ODDS
+        and recommendation.market_odds <= TOP_PLAY_MAX_ODDS
+    )
+
+
+def _underdog_eligible(recommendation: Recommendation) -> bool:
+    return (
+        recommendation.ev > 0
+        and recommendation.edge > 0
+        and recommendation.model_probability >= UNDERDOG_MIN_MODEL_PROBABILITY
+        and recommendation.market_odds >= UNDERDOG_MIN_ODDS
+        and recommendation.market_odds <= UNDERDOG_MAX_ODDS
+    )
+
+
+def _attach_play_scores(game_recommendations: list[Recommendation]) -> None:
+    eligible_top_plays = [recommendation for recommendation in game_recommendations if _top_play_eligible(recommendation)]
+    if not eligible_top_plays:
+        for recommendation in game_recommendations:
+            recommendation.recommendation_score = 0.0
+        return
+
+    min_probability = min(recommendation.model_probability for recommendation in eligible_top_plays)
+    max_probability = max(recommendation.model_probability for recommendation in eligible_top_plays)
+    min_edge = min(recommendation.edge for recommendation in eligible_top_plays)
+    max_edge = max(recommendation.edge for recommendation in eligible_top_plays)
+    min_ev = min(recommendation.ev for recommendation in eligible_top_plays)
+    max_ev = max(recommendation.ev for recommendation in eligible_top_plays)
+
+    for recommendation in game_recommendations:
+        recommendation.recommendation_score = 0.0
+
+    for recommendation in eligible_top_plays:
+        p_norm = _min_max_normalize(recommendation.model_probability, min_probability, max_probability)
+        edge_norm = _min_max_normalize(recommendation.edge, min_edge, max_edge)
+        ev_norm = _min_max_normalize(recommendation.ev, min_ev, max_ev)
+        play_score = (0.50 * p_norm) + (0.25 * edge_norm) + (0.25 * ev_norm)
+        recommendation.recommendation_score = round(play_score, 4)
+
+
+def _select_top_play_bucket(game_recommendations: list[Recommendation]) -> tuple[list[Recommendation], Recommendation | None]:
+    eligible_top_plays = [recommendation for recommendation in game_recommendations if _top_play_eligible(recommendation)]
+    sorted_top_plays = sorted(
+        eligible_top_plays,
+        key=lambda recommendation: (
+            recommendation.recommendation_score or 0.0,
+            recommendation.model_probability,
+            recommendation.edge,
+            recommendation.ev,
+        ),
+        reverse=True,
+    )
+    top_plays = sorted_top_plays[:3]
+    best_bet = sorted_top_plays[0] if sorted_top_plays else None
+    return top_plays, best_bet
+
+
+def _select_underdog_bucket(game_recommendations: list[Recommendation], best_bet: Recommendation | None) -> Recommendation | None:
+    underdogs = [recommendation for recommendation in game_recommendations if _underdog_eligible(recommendation)]
+    if not underdogs:
+        return None
+
+    min_probability = min(recommendation.model_probability for recommendation in underdogs)
+    max_probability = max(recommendation.model_probability for recommendation in underdogs)
+    min_edge = min(recommendation.edge for recommendation in underdogs)
+    max_edge = max(recommendation.edge for recommendation in underdogs)
+    min_ev = min(recommendation.ev for recommendation in underdogs)
+    max_ev = max(recommendation.ev for recommendation in underdogs)
+    min_odds = min(recommendation.market_odds for recommendation in underdogs)
+    max_odds = max(recommendation.market_odds for recommendation in underdogs)
+
+    scored = []
+    for recommendation in underdogs:
+        p_norm = _min_max_normalize(recommendation.model_probability, min_probability, max_probability)
+        edge_norm = _min_max_normalize(recommendation.edge, min_edge, max_edge)
+        ev_norm = _min_max_normalize(recommendation.ev, min_ev, max_ev)
+        odds_norm = _min_max_normalize(float(recommendation.market_odds), float(min_odds), float(max_odds))
+        underdog_score = (0.30 * p_norm) + (0.20 * edge_norm) + (0.30 * ev_norm) + (0.20 * odds_norm)
+        scored.append((round(underdog_score, 4), recommendation))
+
+    scored.sort(
+        key=lambda item: (
+            item[0],
+            item[1].model_probability,
+            item[1].edge,
+            item[1].ev,
+            item[1].market_odds,
+        ),
+        reverse=True,
+    )
+
+    if best_bet is not None:
+        for _, recommendation in scored:
+            if recommendation.player_id != best_bet.player_id:
+                return recommendation
+    return scored[0][1]
 
 
 def _confidence_tag(ev: float, confidence_score: float) -> str:

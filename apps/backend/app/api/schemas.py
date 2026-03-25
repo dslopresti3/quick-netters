@@ -82,6 +82,7 @@ class Recommendation(APIModel):
     implied_probability: float | None = None
     fair_odds: int
     market_odds: int
+    decimal_odds: float | None = None
     edge: float
     ev: float
     confidence_score: float | None = None
@@ -113,6 +114,9 @@ class GameRecommendationsResponse(APIModel):
     date: date
     game: GameSummary
     recommendations: list[Recommendation]
+    top_plays: list[Recommendation] = Field(default_factory=list)
+    best_bet: Recommendation | None = None
+    underdog_value_play: Recommendation | None = None
     projections_available: bool = True
     odds_available: bool = True
     notes: list[str] = Field(default_factory=list)

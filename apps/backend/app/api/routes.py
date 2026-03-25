@@ -280,13 +280,16 @@ def get_game_recommendations(
     if game_id not in games_by_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Game not found for date")
 
-    recommendations = providers.recommendation_service.fetch_for_game(date, game_id)
+    top_plays, best_bet, underdog_value_play = providers.recommendation_service.fetch_game_recommendation_buckets(date, game_id)
     projections_available, odds_available, notes = _availability_notes(date, providers)
     localized_game = _with_display_times([games_by_id[game_id]], _resolve_display_timezone(timezone))[0]
     return GameRecommendationsResponse(
         date=date,
         game=localized_game,
-        recommendations=recommendations,
+        recommendations=top_plays,
+        top_plays=top_plays,
+        best_bet=best_bet,
+        underdog_value_play=underdog_value_play,
         projections_available=projections_available,
         odds_available=odds_available,
         notes=notes,

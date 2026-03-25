@@ -1,6 +1,7 @@
 from datetime import date, datetime, time, timedelta, timezone
 from urllib.error import URLError
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import pytest
 from app.api.routes import get_daily_recommendations, get_date_availability, get_game_recommendations, get_games
@@ -54,7 +55,7 @@ class StubOddsProvider(OddsProvider):
             NormalizedPlayerOdds(
                 nhl_game_id="g-custom-vs-test",
                 nhl_player_id="p-custom",
-                market_odds_american=250,
+                market_odds_american=1200,
                 snapshot_at=datetime.now(timezone.utc),
                 provider_name="stub-odds",
                 provider_event_id="evt-custom",
@@ -143,19 +144,21 @@ def test_games_route_excludes_goalies_from_top_projected_scorer() -> None:
 
 
 def test_games_route_defaults_display_time_to_america_new_york() -> None:
-    selected_date = date(2026, 3, 24)
+    selected_date = date.today()
     payload = get_games(date=selected_date, providers=_provider_registry())
 
     assert payload.games[0].display_timezone == "America/New_York"
-    assert payload.games[0].display_game_time == "2026-03-24 03:00 PM"
+    expected = payload.games[0].game_time.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %I:%M %p")
+    assert payload.games[0].display_game_time == expected
 
 
 def test_games_route_uses_requested_display_timezone_when_valid() -> None:
-    selected_date = date(2026, 3, 24)
+    selected_date = date.today()
     payload = get_games(date=selected_date, timezone="America/Los_Angeles", providers=_provider_registry())
 
     assert payload.games[0].display_timezone == "America/Los_Angeles"
-    assert payload.games[0].display_game_time == "2026-03-24 12:00 PM"
+    expected = payload.games[0].game_time.astimezone(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d %I:%M %p")
+    assert payload.games[0].display_game_time == expected
 
 
 def test_daily_recommendations_route_uses_injected_recommendation_dependencies() -> None:
@@ -167,6 +170,7 @@ def test_daily_recommendations_route_uses_injected_recommendation_dependencies()
     assert payload.recommendations[0].player_id == "p-custom"
     assert payload.recommendations[0].team_name == "Custom Home"
     assert payload.recommendations[0].implied_probability is not None
+    assert payload.recommendations[0].decimal_odds == 13.0
 
 
 def test_game_recommendations_route_uses_injected_registry() -> None:
@@ -175,7 +179,10 @@ def test_game_recommendations_route_uses_injected_registry() -> None:
     payload = get_game_recommendations(game_id="g-custom-vs-test", date=selected_date, providers=_provider_registry())
 
     assert payload.game.game_id == "g-custom-vs-test"
-    assert payload.recommendations[0].player_id == "p-custom"
+    assert payload.top_plays[0].player_id == "p-custom"
+    assert payload.best_bet is not None
+    assert payload.best_bet.player_id == "p-custom"
+    assert payload.underdog_value_play is None
 
 
 class _StubRawOddsClient:

@@ -45,6 +45,7 @@ export interface Recommendation {
   implied_probability?: number;
   fair_odds: number;
   market_odds: number;
+  decimal_odds?: number;
   edge: number;
   ev: number;
   odds_snapshot_at?: string;
@@ -73,6 +74,9 @@ export interface GameRecommendationsResponse {
   date: string;
   game: GameSummary;
   recommendations: Recommendation[];
+  top_plays: Recommendation[];
+  best_bet?: Recommendation;
+  underdog_value_play?: Recommendation;
   projections_available: boolean;
   odds_available: boolean;
   notes: string[];
