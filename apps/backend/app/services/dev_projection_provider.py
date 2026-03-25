@@ -212,6 +212,13 @@ class AutoGeneratingProjectionProvider(ProjectionProvider):
         scheduled_games = self._schedule_provider.fetch(selected_date)
         if not scheduled_games:
             return []
+        if _are_projection_rows_older_than_first_goal_store(self._artifact_path, selected_date):
+            logger.info(
+                "games projection cache invalidated by historical first-goal store update",
+                extra={"selected_date": selected_date.isoformat()},
+            )
+            self._generated_cache_by_date.pop(selected_date, None)
+            _delete_projection_rows_for_date(self._artifact_path, selected_date)
         valid_game_ids = {game.game_id for game in scheduled_games}
         valid_teams_by_game_id = {
             game.game_id: {game.away_team.strip().lower(), game.home_team.strip().lower()}
@@ -678,11 +685,13 @@ def _delete_projection_rows_for_date(artifact_path: Path, selected_date: date) -
 
 
 def _as_serializable_rows(selected_date: date, rows: list[PlayerProjectionCandidate]) -> list[dict[str, Any]]:
+    generated_on_iso = date.today().isoformat()
     serialized: list[dict[str, Any]] = []
     for row in rows:
         serialized.append(
             {
                 "date": selected_date.isoformat(),
+                "projection_generated_on": generated_on_iso,
                 "game_id": row.game_id,
                 "player_id": row.nhl_player_id,
                 "nhl_player_id": row.nhl_player_id,
@@ -1279,6 +1288,36 @@ def _opponent_first_period_allow_proxy(
 def _season_key(selected_date: date) -> str:
     start_year = selected_date.year if selected_date.month >= 9 else selected_date.year - 1
     return f"{start_year}{start_year + 1}"
+
+
+def _are_projection_rows_older_than_first_goal_store(path: Path, selected_date: date) -> bool:
+    payload = _load_artifact(path)
+    projections = payload.get("projections")
+    if not isinstance(projections, list):
+        return False
+
+    first_goal_tracking = payload.get("historical_first_goal_tracking")
+    if not isinstance(first_goal_tracking, dict):
+        return False
+
+    season_store = first_goal_tracking.get(_season_key(selected_date))
+    if not isinstance(season_store, dict):
+        return False
+
+    historical_last_updated_on = _as_iso_date(season_store.get("last_updated_on"))
+    if historical_last_updated_on is None:
+        return False
+
+    selected_date_iso = selected_date.isoformat()
+    selected_rows = [row for row in projections if isinstance(row, dict) and row.get("date") == selected_date_iso]
+    if not selected_rows:
+        return False
+
+    for row in selected_rows:
+        generated_on = _as_iso_date(row.get("projection_generated_on"))
+        if generated_on is None or generated_on < historical_last_updated_on:
+            return True
+    return False
 
 
 def _load_projection_rows_for_date_from_artifact(path: Path, selected_date: date) -> list[PlayerProjectionCandidate]:

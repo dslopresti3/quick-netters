@@ -309,6 +309,98 @@ def test_replaces_stale_dev_placeholder_rows_with_real_generated_rows(tmp_path) 
     assert all("Skater" not in str(row.get("player_name", "")) for row in rows_24)
 
 
+def test_regenerates_projection_rows_when_historical_store_is_newer(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "historical_first_goal_tracking": {
+                    "20252026": {
+                        "processed_game_ids": ["2026020001"],
+                        "player_first_goal_totals": {"8479323": 8},
+                        "player_first_period_goal_totals": {"8479323": 12},
+                        "last_updated_on": "2026-03-24",
+                    }
+                },
+                "projections": [
+                    {
+                        "date": "2026-03-24",
+                        "projection_generated_on": "2026-03-23",
+                        "game_id": "2026020001",
+                        "nhl_player_id": "stale-player-1",
+                        "player_name": "Stale Away",
+                        "team_name": "NY Rangers",
+                        "active_team_name": "NY Rangers",
+                        "is_active_roster": True,
+                        "position_code": "C",
+                        "model_probability": 0.4,
+                    },
+                    {
+                        "date": "2026-03-24",
+                        "projection_generated_on": "2026-03-23",
+                        "game_id": "2026020001",
+                        "nhl_player_id": "stale-player-2",
+                        "player_name": "Stale Home",
+                        "team_name": "Boston Bruins",
+                        "active_team_name": "Boston Bruins",
+                        "is_active_roster": True,
+                        "position_code": "C",
+                        "model_probability": 0.6,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    selected_date = date(2026, 3, 24)
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026020001",
+                    game_time=datetime(2026, 3, 24, 23, 0, tzinfo=timezone.utc),
+                    away_team="NY Rangers",
+                    home_team="Boston Bruins",
+                )
+            ]
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(
+        json.dumps(
+            {
+                "players": [
+                    {"player_id": "8479323", "player_name": "Artemi Panarin", "active_team_name": "NY Rangers", "is_active_roster": True, "position_code": "LW", "historical_season_first_goals": 8, "historical_season_games_played": 82},
+                    {"player_id": "8476459", "player_name": "Mika Zibanejad", "active_team_name": "NY Rangers", "is_active_roster": True, "position_code": "C", "historical_season_first_goals": 7, "historical_season_games_played": 81},
+                    {"player_id": "8477956", "player_name": "David Pastrnak", "active_team_name": "Boston Bruins", "is_active_roster": True, "position_code": "RW", "historical_season_first_goals": 9, "historical_season_games_played": 82},
+                    {"player_id": "8473419", "player_name": "Brad Marchand", "active_team_name": "Boston Bruins", "is_active_roster": True, "position_code": "LW", "historical_season_first_goals": 6, "historical_season_games_played": 78},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=ActiveRosterRepository(roster_path=roster_path),
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+
+    assert len(rows) == 4
+    assert all(not row.nhl_player_id.startswith("stale-player") for row in rows)
+
+    persisted_rows = [
+        row
+        for row in json.loads(artifact.read_text(encoding="utf-8"))["projections"]
+        if row.get("date") == selected_date.isoformat()
+    ]
+    assert len(persisted_rows) == 4
+    assert all(row.get("projection_generated_on") is not None for row in persisted_rows)
+    assert all(not str(row.get("nhl_player_id", "")).startswith("stale-player") for row in persisted_rows)
+
+
 def test_schedule_is_pulled_before_active_roster_generation(tmp_path) -> None:
     calls: list[str] = []
     selected_date = date(2026, 3, 24)
