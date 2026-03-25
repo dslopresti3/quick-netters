@@ -18,6 +18,7 @@ export interface TeamProjectionLeader {
   team: string;
   player_id: string;
   player_name: string;
+  player_team?: string;
   model_probability: number;
 }
 
@@ -39,6 +40,7 @@ export interface Recommendation {
   home_team: string;
   player_id: string;
   player_name: string;
+  player_team?: string;
   model_probability: number;
   implied_probability?: number;
   fair_odds: number;
@@ -47,6 +49,8 @@ export interface Recommendation {
   ev: number;
   odds_snapshot_at?: string;
   confidence_tag?: ConfidenceTag;
+  goals_this_year?: number;
+  first_goals_this_year?: number;
 }
 
 export interface GamesResponse {

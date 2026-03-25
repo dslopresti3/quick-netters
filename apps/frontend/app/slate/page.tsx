@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { DatePickerForm } from "../../components/date-picker-form";
+import { RecommendationCard } from "../../components/recommendation-card";
 import { fetchDailyRecommendationsByDate, fetchDateAvailability, fetchGamesByDate, getCurrentUtcDate, resolveDisplayTimezone } from "../../lib/api";
 
 type SlatePageProps = {
@@ -122,13 +123,11 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
         ) : !dailyRecommendations || dailyRecommendations.recommendations.length === 0 ? (
           <p className="empty-state">No value picks available for {selectedDate}.</p>
         ) : (
-          <ol className="pick-list">
-            {dailyRecommendations.recommendations.slice(0, 3).map((pick) => (
-              <li key={`${pick.game_id}-${pick.player_id}`}>
-                <strong>{pick.player_name}</strong> · Model {(pick.model_probability * 100).toFixed(1)}% · Fair +{pick.fair_odds} · Market +{pick.market_odds} · Edge {(pick.edge * 100).toFixed(1)}% · EV {(pick.ev * 100).toFixed(1)}%
-              </li>
+          <div className="recommendation-grid">
+            {dailyRecommendations.recommendations.slice(0, 3).map((pick, index) => (
+              <RecommendationCard key={`${pick.game_id}-${pick.player_id}`} recommendation={pick} rank={index + 1} />
             ))}
-          </ol>
+          </div>
         )}
       </section>
 
