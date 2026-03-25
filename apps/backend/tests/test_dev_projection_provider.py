@@ -964,6 +964,115 @@ def test_history_loader_accepts_first_goal_alias_fields(tmp_path) -> None:
     assert history["p2"].season_first_goals == 4
 
 
+def test_history_loader_accepts_total_goal_alias_fields(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {
+                "date": "2026-03-24",
+                "game_id": "g1",
+                "nhl_player_id": "8476459",
+                "player_id": "8476459",
+                "player_name": "Mika Zibanejad",
+                "team_name": "NY Rangers",
+                "active_team_name": "NY Rangers",
+                "is_active_roster": True,
+                "model_probability": 0.2,
+                "goals_this_year": 29,
+                "first_goals_this_year": 7,
+                "historical_season_games_played": 74,
+            }
+        ],
+    )
+
+    from app.services.dev_projection_provider import _load_player_first_goal_history_from_artifact
+
+    history = _load_player_first_goal_history_from_artifact(
+        selected_date=date(2026, 3, 25),
+        eligible_player_ids={"8476459"},
+        path=artifact,
+    )
+
+    assert history["8476459"].season_total_goals == 29
+    assert history["8476459"].season_first_goals == 7
+
+
+def test_history_loader_merges_stored_first_goal_history_and_keeps_total_goals(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NHL_HISTORY_MAX_LIVE_REQUESTS_PER_GAMES", "0")
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {
+                "date": "2026-03-24",
+                "game_id": "g1",
+                "nhl_player_id": "8476459",
+                "player_id": "8476459",
+                "player_name": "Mika Zibanejad",
+                "team_name": "NY Rangers",
+                "active_team_name": "NY Rangers",
+                "is_active_roster": True,
+                "model_probability": 0.2,
+                "goals_this_year": 29,
+                "first_goals_this_year": 6,
+                "historical_season_games_played": 74,
+            }
+        ],
+    )
+    with (
+        patch("app.services.dev_projection_provider.refresh_incremental_first_goal_derived_data"),
+        patch(
+            "app.services.dev_projection_provider.load_stored_first_goal_derived_history",
+            return_value={"8476459": PlayerHistoricalProduction(season_first_goals=7)},
+        ),
+    ):
+        from app.services.dev_projection_provider import load_player_first_goal_history_from_nhl_api
+
+        history = load_player_first_goal_history_from_nhl_api(
+            selected_date=date(2026, 3, 25),
+            eligible_player_ids={"8476459"},
+            path=artifact,
+        )
+
+    assert history["8476459"].season_total_goals == 29
+    assert history["8476459"].season_first_goals == 7
+
+
+def test_history_loader_fetches_live_totals_when_cached_has_only_first_goal_data(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("NHL_HISTORY_MAX_LIVE_REQUESTS_PER_GAMES", "10")
+    artifact = tmp_path / "projections.json"
+    _write_artifact(artifact, [])
+
+    with (
+        patch("app.services.dev_projection_provider.refresh_incremental_first_goal_derived_data"),
+        patch(
+            "app.services.dev_projection_provider.load_stored_first_goal_derived_history",
+            return_value={"8476459": PlayerHistoricalProduction(season_first_goals=7)},
+        ),
+        patch(
+            "app.services.dev_projection_provider.fetch_player_first_goal_history",
+            return_value=PlayerHistoricalProduction(
+                season_first_goals=2,
+                season_total_goals=29,
+                season_games_played=74,
+            ),
+        ) as fetch_mock,
+    ):
+        from app.services.dev_projection_provider import load_player_first_goal_history_from_nhl_api
+
+        history = load_player_first_goal_history_from_nhl_api(
+            selected_date=date(2026, 3, 25),
+            eligible_player_ids={"8476459"},
+            path=artifact,
+        )
+
+    fetch_mock.assert_called_once_with(player_id="8476459", selected_date=date(2026, 3, 25))
+    assert history["8476459"].season_total_goals == 29
+    # Preserve first-goal total from incremental derived data.
+    assert history["8476459"].season_first_goals == 7
+
+
 def test_projection_row_loader_accepts_first_goal_alias_fields(tmp_path) -> None:
     artifact = tmp_path / "projections.json"
     _write_artifact(
