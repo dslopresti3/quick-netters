@@ -247,3 +247,65 @@ def test_the_odds_api_client_event_level_odds_request_uses_expected_params() -> 
         "oddsFormat": ["american"],
         "dateFormat": ["iso"],
     }
+
+
+def test_the_odds_api_adapter_uses_description_for_generic_yes_no_outcome_names() -> None:
+    now = datetime(2026, 3, 25, 22, 0, tzinfo=timezone.utc)
+    raw_events = [
+        {
+            "id": "evt-200",
+            "bookmakers": [
+                {
+                    "key": "draftkings",
+                    "markets": [
+                        {
+                            "key": "player_goal_scorer_first",
+                            "last_update": "2026-03-25T21:55:00Z",
+                            "outcomes": [
+                                {"name": "Yes", "description": "Artemi Panarin", "price": "+750"},
+                                {"name": "No", "description": "Artemi Panarin", "price": "-1800"},
+                                {"name": "Over", "description": "Connor McDavid", "price": "+650"},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+    rows = TheOddsApiAdapter(source_name="the-odds-api").normalize(raw_events, now=now)
+
+    assert len(rows) == 3
+    assert rows[0].provider_player_name_raw == "Artemi Panarin"
+    assert rows[1].provider_player_name_raw == "Artemi Panarin"
+    assert rows[2].provider_player_name_raw == "Connor McDavid"
+
+
+def test_the_odds_api_adapter_skips_generic_outcome_name_without_player_description() -> None:
+    now = datetime(2026, 3, 25, 22, 0, tzinfo=timezone.utc)
+    raw_events = [
+        {
+            "id": "evt-201",
+            "bookmakers": [
+                {
+                    "key": "draftkings",
+                    "markets": [
+                        {
+                            "key": "player_goal_scorer_first",
+                            "last_update": "2026-03-25T21:55:00Z",
+                            "outcomes": [
+                                {"name": "Yes", "price": "+750"},
+                                {"name": "No", "description": "No", "price": "+100"},
+                                {"name": "Filip Forsberg", "price": "+800"},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+    rows = TheOddsApiAdapter(source_name="the-odds-api").normalize(raw_events, now=now)
+
+    assert len(rows) == 1
+    assert rows[0].provider_player_name_raw == "Filip Forsberg"

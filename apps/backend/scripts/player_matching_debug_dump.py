@@ -7,14 +7,14 @@ from datetime import date, datetime, timezone
 
 from app.services.identity import name_aliases
 from app.services.odds import NormalizedPlayerOdds
-from app.services.odds_provider import LiveOddsProvider, TheOddsApiClient, _parse_american_odds
+from app.services.odds_provider import LiveOddsProvider, TheOddsApiClient, _extract_player_label, _parse_american_odds
 from app.services.provider_wiring import build_provider_registry_from_env
 from app.services.recommendation_service import _match_event_to_game, _match_player_to_projection
 
 
 def _build_row(event: dict, outcome: dict, event_id: str | None, provider_start: datetime | None, snapshot_at: datetime) -> NormalizedPlayerOdds | None:
-    player_name = outcome.get("name")
-    if not isinstance(player_name, str) or not player_name.strip():
+    player_name = _extract_player_label(outcome)
+    if player_name is None:
         return None
     odds = _parse_american_odds(outcome.get("price"))
     if odds is None:
