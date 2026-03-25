@@ -23,13 +23,10 @@ Quick Netters helps you evaluate first-goal markets by surfacing three recommend
 
 > Placeholder screenshot: daily slate listing games plus top recommendation context.
 
-![Slate view placeholder](docs/images/placeholder-slate-view.svg)
-
 ### Single-game recommendation view
 
 > Placeholder screenshot: game detail with Top 3 Plays, Best Bet, and Underdog Value Play cards.
 
-![Single-game recommendation placeholder](docs/images/placeholder-game-recommendations.svg)
 
 ## How Recommendations Work
 
