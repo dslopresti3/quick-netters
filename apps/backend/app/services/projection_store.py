@@ -5,9 +5,11 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import date
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from app.services.identity import name_aliases, team_alias_tokens
 from app.services.interfaces import (
     PlayerHistoricalProduction,
     PlayerProjectionCandidate,
@@ -91,6 +93,7 @@ class StoreBackedProjectionProvider(ProjectionProvider):
 
 
 _PROJECTED_ROOT = Path(__file__).resolve().parents[1] / "data" / "projections"
+_ROSTER_ARTIFACT = Path(__file__).resolve().parents[1] / "data" / "rosters" / "current_active_rosters.json"
 
 
 @dataclass(frozen=True)
@@ -159,10 +162,21 @@ def _parse_projection_row(raw_row: dict[str, Any], idx: int) -> PlayerFirstGoalP
     player_id_raw = raw_row.get("player_id")
     player_name_raw = raw_row.get("player_name")
     team_name_raw = raw_row.get("team_name")
+    if team_name_raw is None:
+        team_name_raw = raw_row.get("team")
     active_team_name_raw = raw_row.get("active_team_name")
     is_active_roster_raw = raw_row.get("is_active_roster", True)
-    season_first_goals_raw = raw_row.get("historical_season_first_goals")
+    season_first_goals_raw = _coalesce(
+        raw_row.get("historical_season_first_goals"),
+        raw_row.get("season_first_goals"),
+        raw_row.get("first_goals_this_year"),
+    )
     season_games_played_raw = raw_row.get("historical_season_games_played")
+    season_total_goals_raw = _coalesce(
+        raw_row.get("historical_season_total_goals"),
+        raw_row.get("season_total_goals"),
+        raw_row.get("goals_this_year"),
+    )
     probability_raw = raw_row.get("model_probability")
     if probability_raw is None:
         probability_raw = raw_row.get("probability")
@@ -221,10 +235,27 @@ def _parse_projection_row(raw_row: dict[str, Any], idx: int) -> PlayerFirstGoalP
             )
         season_games_played = float(season_games_played_raw)
 
+    canonical_player_id_value = canonical_player_id.strip()
+    if not canonical_player_id_value.isdigit():
+        resolved_player_id = _resolve_nhl_player_id_from_roster(
+            player_name=player_name_raw.strip(),
+            team_name=active_team_name_raw.strip() if isinstance(active_team_name_raw, str) else team_name_raw.strip(),
+        )
+        if resolved_player_id is not None:
+            canonical_player_id_value = resolved_player_id
+
+    season_total_goals: float | None = None
+    if season_total_goals_raw is not None:
+        if not isinstance(season_total_goals_raw, (int, float)):
+            raise ProjectionStoreValidationError(
+                f"Projection row at index {idx} has a non-numeric season total goals field."
+            )
+        season_total_goals = float(season_total_goals_raw)
+
     return PlayerFirstGoalProjectionRow(
         projection_date=projection_date,
         game_id=game_id_raw.strip(),
-        nhl_player_id=canonical_player_id.strip(),
+        nhl_player_id=canonical_player_id_value,
         player_name=player_name_raw.strip(),
         projected_team_name=team_name_raw.strip(),
         active_team_name=active_team_name_raw.strip(),
@@ -232,6 +263,57 @@ def _parse_projection_row(raw_row: dict[str, Any], idx: int) -> PlayerFirstGoalP
         historical_production=PlayerHistoricalProduction(
             season_first_goals=season_first_goals,
             season_games_played=season_games_played,
+            season_total_goals=season_total_goals,
         ),
         model_probability=probability,
     )
+
+
+def _coalesce(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+@lru_cache(maxsize=1)
+def _load_roster_player_ids() -> dict[tuple[str, str], str]:
+    if not _ROSTER_ARTIFACT.exists():
+        return {}
+    with _ROSTER_ARTIFACT.open("r", encoding="utf-8") as infile:
+        payload = json.load(infile)
+    if isinstance(payload, dict):
+        payload = payload.get("players")
+    if not isinstance(payload, list):
+        return {}
+
+    mapping: dict[tuple[str, str], str] = {}
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        player_name = row.get("player_name")
+        player_id = row.get("player_id")
+        active_team_name = row.get("active_team_name")
+        if not isinstance(player_name, str) or not player_name.strip():
+            continue
+        if not isinstance(player_id, str) or not player_id.strip() or not player_id.strip().isdigit():
+            continue
+        if not isinstance(active_team_name, str) or not active_team_name.strip():
+            continue
+        for name_alias in name_aliases(player_name):
+            for team_alias in team_alias_tokens(active_team_name):
+                mapping[(name_alias, team_alias)] = player_id.strip()
+
+    return mapping
+
+
+def _resolve_nhl_player_id_from_roster(player_name: str, team_name: str) -> str | None:
+    roster_map = _load_roster_player_ids()
+    if not roster_map:
+        return None
+    for name_alias in name_aliases(player_name):
+        for team_alias in team_alias_tokens(team_name):
+            mapped = roster_map.get((name_alias, team_alias))
+            if mapped is not None:
+                return mapped
+    return None
