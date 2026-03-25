@@ -5,10 +5,10 @@ This document defines ingestion, normalization, and feature-ready historical out
 ## Scope
 
 - Uses **last season + current season** as the modeling history window.
-- Uses **MoneyPuck shot-level files** as historical event source.
-- Expects **public NHL endpoints** as the source for schedule and roster data for forward compatibility.
-- Expects an **odds provider** for market prices.
-- Does **not** include model training or prediction logic.
+- Uses **MoneyPuck shot-level files** as the historical event source.
+- Expects **public NHL endpoints** for schedule/roster inputs.
+- Expects an **odds provider** for market price inputs where needed.
+- Does **not** include model training orchestration or backend recommendation serving.
 
 ## Folder conventions
 
@@ -110,8 +110,8 @@ Columns:
 
 `model_features.csv` is generated at the team-game grain and includes:
 
-- all `team_games` columns needed for modeling features
-- market fields from odds provider where available:
+- required `team_games`-derived features,
+- market fields where available:
   - `market_moneyline`
   - `market_total`
 
@@ -119,20 +119,20 @@ Columns:
 
 The pipeline enforces:
 
-- missing table protection (`table is empty`)
-- required column checks
-- missing value checks for key fields
-- duplicate primary key checks
+- missing table protection (`table is empty`),
+- required column checks,
+- missing value checks for key fields,
+- duplicate primary key checks.
 
 ## Running
 
 From repository root:
 
 ```bash
-python -m quick_netters_modeling.historical.cli --current-season 2026 --data-root packages/modeling/data
+PYTHONPATH=packages/modeling/src python -m quick_netters_modeling.historical.cli --current-season 2026 --data-root packages/modeling/data
 ```
 
-or
+Alternative helper script:
 
 ```bash
 PYTHONPATH=packages/modeling/src python packages/modeling/scripts/run_historical_pipeline.py --current-season 2026
