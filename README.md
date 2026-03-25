@@ -1,93 +1,100 @@
 # Quick Netters
 
-Quick Netters is an NHL first-goal recommendation app built as a monorepo. It combines model-generated player scoring probabilities with market odds to produce clear, game-level betting recommendations.
+Quick Netters is an NHL first-goal recommendation platform that combines model probabilities and live market odds into actionable betting insights.
 
-## Overview
+Quick Netters helps you evaluate first-goal markets by surfacing three recommendation buckets per game—**Top 3 Plays**, **Best Bet**, and **Underdog Value Play**—with backend-calculated value metrics so you can quickly assess probability vs price.
 
-For a selected UTC date, the platform:
+## Key Features
 
-1. fetches the NHL schedule,
-2. loads first-goal projection candidates,
-3. matches eligible players to market odds snapshots,
-4. computes value metrics in the backend service layer,
-5. returns recommendation buckets for each game.
+- **Top 3 Plays** for each game (balanced blend of probability and value)
+- **Best Bet** for each game (strongest strict value play)
+- **Underdog Value Play** for each game (higher-odds positive-EV candidate when available)
+- **Backend-computed betting metrics** in API responses:
+  - `model_probability`
+  - `market_odds`
+  - `decimal_odds`
+  - `implied_probability`
+  - `edge`
+  - `ev`
 
-## Feature Summary
+## Product Preview (Placeholders)
 
-- **API-backed slate and game detail views** (no hardcoded UI picks).
-- **Single-game recommendation buckets**:
-  - **Top 3 Plays**
-  - **Best Bet**
-  - **Underdog Value Play**
-- **Date availability metadata** for frontend picker bounds and empty states.
-- **Top projected scorer per team** shown on game cards/details.
-- **Modeling package** for historical data prep and first-goal probability generation.
+### Slate view
 
-## Architecture at a Glance
+> Placeholder screenshot: daily slate listing games plus top recommendation context.
 
-| Layer | Location | Responsibility |
-|---|---|---|
-| Frontend | `apps/frontend` | Next.js UI for date selection, slate browsing, and game detail recommendations |
-| Backend API | `apps/backend/app/api` | FastAPI routes for availability, games, daily recommendations, game recommendations |
-| Recommendation Service | `apps/backend/app/services/recommendation_service.py` | Computes recommendation math and selects bucket outputs |
-| Modeling Pipelines | `packages/modeling` | Historical ingestion + first-goal model pipeline support |
-| Product/Tech Docs | `docs/` and `apps/backend/docs/` | Odds/value formulas, pipeline docs, API metadata contracts |
+![Slate view placeholder](docs/images/placeholder-slate-view.svg)
 
-## Current Recommendation Logic
+### Single-game recommendation view
 
-### Buckets
+> Placeholder screenshot: game detail with Top 3 Plays, Best Bet, and Underdog Value Play cards.
 
-Quick Netters uses three distinct bucket outputs for single-game recommendations:
+![Single-game recommendation placeholder](docs/images/placeholder-game-recommendations.svg)
+
+## How Recommendations Work
+
+Quick Netters exposes three recommendation buckets per game:
 
 1. **Top 3 Plays**
-   - Broader blended ranking of best overall candidates.
-   - **Not** simply top 3 by raw model probability.
+   - Ranked using a blended score of model confidence and value.
+   - **Important:** Top 3 Plays are **not** simply the top model probabilities.
 2. **Best Bet**
-   - Strongest strict value play after tighter eligibility filters.
+   - The strongest strict value play after tighter value filters.
 3. **Underdog Value Play**
-   - Higher-odds positive-value option (positive edge + positive EV).
-   - Can be `null` when no candidate qualifies.
+   - A higher-odds positive-value option (positive `edge` and positive `ev`).
+   - May be `null` when no candidate qualifies.
 
-### Recommendation Metrics
+## Architecture Overview
 
-Each recommendation includes:
+Quick Netters is a monorepo with clear frontend/backend separation:
 
-- `model_probability`
-- `market_odds`
-- `decimal_odds`
-- `implied_probability`
-- `edge`
-- `ev`
+- **Frontend (`apps/frontend`)**: Next.js app for browsing slate and game recommendations.
+- **Backend (`apps/backend`)**: FastAPI API that fetches schedules/projections/odds and computes recommendations.
+- **Modeling (`packages/modeling`)**: separate Python package for historical ingestion and model pipeline support.
 
-Recommendation math and bucket selection are computed in `ValueRecommendationService` (backend/service layer).
+### Backend vs Frontend responsibilities
 
-## API Snapshot
+- All betting math is computed in the backend, including:
+  - `implied_probability`
+  - `edge`
+  - `ev`
+- Frontend is display-only: it renders API outputs and does not calculate betting metrics.
 
-Local backend base URL: `http://localhost:8000`
+## Monorepo Structure
 
-- `GET /availability/date?date=YYYY-MM-DD`
-- `GET /games?date=YYYY-MM-DD&timezone=America/New_York`
-- `GET /recommendations/daily?date=YYYY-MM-DD`
-- `GET /recommendations/game?game_id=...&date=YYYY-MM-DD&timezone=America/New_York`
+```text
+quick-netters/
+├── apps/
+│   ├── frontend/            # Next.js application
+│   └── backend/             # FastAPI service
+├── packages/
+│   └── modeling/            # Modeling logic and pipelines
+└── docs/                    # Product and technical documentation
+```
 
-Single-game response shape includes:
+### Workspace/package management note
 
-- `top_plays`
-- `best_bet`
-- `underdog_value_play`
+- The Node workspace (`package.json` at repo root) manages the **frontend only**.
+- The backend is managed separately with Python virtual environments and `requirements.txt`.
 
-`recommendations` is still returned for compatibility and currently aligns with `top_plays`.
+## Quick Start (Fast Path)
 
-## Local Setup
+This is the shortest path to run the app locally.
 
-### Prerequisites
+### 1) Clone and enter repo
 
-- Node.js 20+
-- Python 3.11+
+```bash
+git clone <YOUR_REPO_URL>
+cd quick-netters
+```
 
-### Environment Configuration
+### 2) Install frontend dependencies
 
-From repo root:
+```bash
+npm install
+```
+
+### 3) Configure environment files
 
 ```bash
 cp .env.example .env
@@ -95,42 +102,58 @@ cp apps/frontend/.env.example apps/frontend/.env.local
 cp apps/backend/.env.example apps/backend/.env
 ```
 
-## Run Locally
-
-### Frontend (Next.js)
-
-From repo root:
-
-```bash
-npm install
-npm run dev:frontend
-```
-
-Alternative:
-
-```bash
-cd apps/frontend
-npm install
-npm run dev
-```
-
-Frontend: `http://localhost:3000`
-
-### Backend (FastAPI)
+### 4) Create backend virtual environment and install dependencies
 
 ```bash
 cd apps/backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cd ../..
+```
+
+### 5) Run backend
+
+```bash
+cd apps/backend
+source .venv/bin/activate
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Backend: `http://localhost:8000` (OpenAPI: `http://localhost:8000/docs`)
+Backend: http://localhost:8000
+OpenAPI docs: http://localhost:8000/docs
 
-## Testing and Checks
+### 6) Run frontend (new terminal)
 
-### Backend Tests
+```bash
+cd quick-netters
+npm run dev:frontend
+```
+
+Frontend: http://localhost:3000
+
+## API Overview
+
+Base URL (local): `http://localhost:8000`
+
+- `GET /availability/date?date=YYYY-MM-DD`
+- `GET /games?date=YYYY-MM-DD&timezone=America/New_York`
+- `GET /recommendations/daily?date=YYYY-MM-DD`
+- `GET /recommendations/game?game_id=...&date=YYYY-MM-DD&timezone=America/New_York`
+
+Game recommendation responses include:
+
+- `top_plays`
+- `best_bet`
+- `underdog_value_play` (nullable)
+
+Compatibility note:
+
+- `recommendations` is also returned and currently maps to `top_plays` for compatibility.
+
+## Testing
+
+### Backend tests
 
 ```bash
 cd apps/backend
@@ -138,46 +161,27 @@ source .venv/bin/activate
 python -m pytest tests
 ```
 
-If needed:
-
-```bash
-pip install pytest
-```
-
-### Frontend Lint
-
-From repo root:
+### Frontend lint
 
 ```bash
 npm run lint:frontend
 ```
 
-## Repository Structure
+## Limitations
 
-```text
-quick-netters/
-├── apps/
-│   ├── backend/
-│   │   ├── app/
-│   │   └── docs/
-│   └── frontend/
-├── docs/
-└── packages/
-    └── modeling/
-```
+- Recommendations depend on external schedule, projection, and odds availability.
+- `underdog_value_play` may be `null` on slates with no qualifying higher-odds positive-EV candidate.
+- Placeholder screenshots are included; real product images can be added later.
+
+## Roadmap
+
+- Add real README screenshots/GIF walkthroughs.
+- Publish a hosted demo link.
+- Expand model and recommendation explainability in API docs.
 
 ## Additional Documentation
 
-- Odds and value layer: `docs/odds-value-layer.md`
-- Historical data pipeline: `docs/historical-data-pipeline.md`
-- First-goal modeling pipeline: `docs/first-goal-modeling-pipeline.md`
-- Date availability contract: `apps/backend/docs/date-availability-metadata.md`
-
-## Current Status
-
-Active focus areas:
-
-- stable API-backed recommendation delivery,
-- consistent Top 3 / Best Bet / Underdog semantics,
-- resilient data-availability signaling,
-- iterative modeling pipeline improvements.
+- `docs/odds-value-layer.md`
+- `docs/historical-data-pipeline.md`
+- `docs/first-goal-modeling-pipeline.md`
+- `apps/backend/docs/date-availability-metadata.md`
