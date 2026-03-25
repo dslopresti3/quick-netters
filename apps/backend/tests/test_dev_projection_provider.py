@@ -1287,6 +1287,7 @@ def test_recent_adjustments_are_added_after_stable_multiplier() -> None:
     from app.services.dev_projection_provider import _PlayerModelFeatures
 
     base_features = _PlayerModelFeatures(
+        games_played=82.0,
         first_goals_per_game=0.06,
         goals_per_game=0.30,
         first_period_goals_per_game=0.08,
@@ -1298,6 +1299,7 @@ def test_recent_adjustments_are_added_after_stable_multiplier() -> None:
         offensive_tier_multiplier=1.8,
     )
     hot_recent = _PlayerModelFeatures(
+        games_played=82.0,
         first_goals_per_game=0.06,
         goals_per_game=0.30,
         first_period_goals_per_game=0.08,
@@ -1317,6 +1319,66 @@ def test_recent_adjustments_are_added_after_stable_multiplier() -> None:
         + _DEFAULT_TEMPLATE.player_recent_outcome_weight * hot_recent.recent_outcome_form
     )
     assert hot_score - base_score == pytest.approx(expected_recent_lift, abs=1e-9)
+
+
+def test_low_end_zero_first_goal_profile_gets_downgraded_vs_elite_before_after() -> None:
+    from app.services.dev_projection_provider import _DEFAULT_TEMPLATE, _player_first_goal_score
+    from app.services.dev_projection_provider import _PlayerModelFeatures
+
+    eyssimont_like = _PlayerModelFeatures(
+        games_played=70.0,
+        first_goals_per_game=0.0,
+        goals_per_game=0.14,
+        first_period_goals_per_game=0.0,
+        first_period_shots_per_game=0.15,
+        shots_per_game=1.6,
+        recent_process_form=1.4,
+        recent_outcome_form=0.1,
+        stability_score=1.0,
+        offensive_tier_multiplier=0.95,
+    )
+    elite_scorer = _PlayerModelFeatures(
+        games_played=70.0,
+        first_goals_per_game=0.08,
+        goals_per_game=0.50,
+        first_period_goals_per_game=0.06,
+        first_period_shots_per_game=0.40,
+        shots_per_game=4.3,
+        recent_process_form=1.0,
+        recent_outcome_form=0.3,
+        stability_score=1.0,
+        offensive_tier_multiplier=1.55,
+    )
+
+    def _legacy_score(features: _PlayerModelFeatures) -> float:
+        stable_baseline = (
+            _DEFAULT_TEMPLATE.player_first_goal_weight * features.first_goals_per_game
+            + _DEFAULT_TEMPLATE.player_total_goal_weight * features.goals_per_game
+            + _DEFAULT_TEMPLATE.player_first_period_goal_weight * features.first_period_goals_per_game
+            + _DEFAULT_TEMPLATE.player_first_period_shot_weight * features.first_period_shots_per_game
+            + _DEFAULT_TEMPLATE.player_shots_per_game_weight * features.shots_per_game
+        )
+        recent_process_adjustment = _DEFAULT_TEMPLATE.player_recent_process_weight * features.recent_process_form
+        recent_outcome_adjustment = _DEFAULT_TEMPLATE.player_recent_outcome_weight * features.recent_outcome_form
+        return max(
+            (stable_baseline * features.offensive_tier_multiplier) + recent_process_adjustment + recent_outcome_adjustment,
+            _DEFAULT_TEMPLATE.min_player_share_floor,
+        )
+
+    before_scores = {
+        "michael_eyssimont_like": _legacy_score(eyssimont_like),
+        "elite_scorer": _legacy_score(elite_scorer),
+    }
+    after_scores = {
+        "michael_eyssimont_like": _player_first_goal_score(eyssimont_like, _DEFAULT_TEMPLATE),
+        "elite_scorer": _player_first_goal_score(elite_scorer, _DEFAULT_TEMPLATE),
+    }
+
+    assert after_scores["elite_scorer"] > after_scores["michael_eyssimont_like"]
+    assert after_scores["michael_eyssimont_like"] < before_scores["michael_eyssimont_like"]
+    assert (after_scores["elite_scorer"] / after_scores["michael_eyssimont_like"]) > (
+        before_scores["elite_scorer"] / before_scores["michael_eyssimont_like"]
+    )
 
 
 def test_no_placeholder_rows_emitted_in_real_mode(tmp_path) -> None:
