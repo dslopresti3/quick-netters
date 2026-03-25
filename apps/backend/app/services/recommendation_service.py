@@ -224,6 +224,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
                     player_id=player_id,
                     player_name=projection.player_name,
                     player_team=projection.projected_team_name,
+                    team_name=projection.projected_team_name,
                     model_probability=round(projection.model_probability, 4),
                     fair_odds=fair_odds,
                     market_odds=odds_snapshot.market_odds_american,
