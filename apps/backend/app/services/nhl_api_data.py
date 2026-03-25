@@ -217,10 +217,22 @@ def backfill_current_regular_season_first_goal_derived_data(selected_date: date,
     season_end = selected_date
     scanned_dates = 0
     scanned_games = 0
+    skipped_games = 0
     newly_processed: list[str] = []
+    failed_game_ids: list[str] = []
+    candidate_game_ids: list[str] = []
+    candidate_game_ids_seen: set[str] = set()
+    progress_log_interval = 25
+    schedule_scan_log_interval = 30
     target_date = season_start
     while target_date <= season_end:
         scanned_dates += 1
+        if scanned_dates == 1 or scanned_dates % schedule_scan_log_interval == 0:
+            print(
+                "Backfill schedule scan progress: "
+                f"scanned_dates={scanned_dates} current_date={target_date.isoformat()} "
+                f"scanned_games={scanned_games} candidates={len(candidate_game_ids)} skipped={skipped_games}"
+            )
         schedule_payload = fetch_json(
             url=f"{NHL_WEB_BASE}/schedule/{target_date.isoformat()}",
             timeout_seconds=NHL_SCHEDULE_TIMEOUT_SECONDS,
@@ -234,8 +246,33 @@ def backfill_current_regular_season_first_goal_derived_data(selected_date: date,
             if not _is_completed_game(game):
                 continue
             game_id = str(game.get("id", "")).strip()
-            if not game_id or game_id in processed_game_ids:
+            if not game_id:
+                skipped_games += 1
                 continue
+            if game_id in processed_game_ids:
+                skipped_games += 1
+                continue
+            if game_id in candidate_game_ids_seen:
+                skipped_games += 1
+                continue
+            candidate_game_ids_seen.add(game_id)
+            candidate_game_ids.append(game_id)
+        target_date += timedelta(days=1)
+
+    total_candidates = len(candidate_game_ids)
+    print(
+        "Backfill candidates prepared: "
+        f"total_candidates={total_candidates}, "
+        f"scanned_dates={scanned_dates}, scanned_games={scanned_games}, skipped={skipped_games}"
+    )
+
+    for index, game_id in enumerate(candidate_game_ids, start=1):
+        print(
+            "Backfill game start: "
+            f"{index}/{total_candidates} game_id={game_id} "
+            f"processed={len(newly_processed)} skipped={skipped_games} failed={len(failed_game_ids)}"
+        )
+        try:
             pbp_payload = fetch_json(
                 url=f"{NHL_WEB_BASE}/gamecenter/{game_id}/play-by-play",
                 timeout_seconds=NHL_PLAY_BY_PLAY_TIMEOUT_SECONDS,
@@ -246,7 +283,21 @@ def backfill_current_regular_season_first_goal_derived_data(selected_date: date,
                 _increment_player_counter(store, "player_first_period_goal_totals", scorer)
             processed_game_ids.add(game_id)
             newly_processed.append(game_id)
-        target_date += timedelta(days=1)
+        except Exception as exc:
+            failed_game_ids.append(game_id)
+            print(f"Backfill game failed: game_id={game_id} error={exc}")
+        if index % progress_log_interval == 0 or index == total_candidates:
+            print(
+                "Backfill progress: "
+                f"{index}/{total_candidates} game_id={game_id} "
+                f"processed={len(newly_processed)} skipped={skipped_games} failed={len(failed_game_ids)}"
+            )
+
+    print(
+        "Backfill summary: "
+        f"total_candidates={total_candidates} processed={len(newly_processed)} "
+        f"skipped={skipped_games} failed={len(failed_game_ids)} failed_game_ids={failed_game_ids}"
+    )
 
     store["processed_game_ids"] = sorted(processed_game_ids)
     store["last_updated_on"] = selected_date.isoformat()
@@ -259,9 +310,13 @@ def backfill_current_regular_season_first_goal_derived_data(selected_date: date,
         "regular_season_filter": regular_season_filter,
         "scanned_dates": scanned_dates,
         "scanned_games": scanned_games,
+        "skipped_games": skipped_games,
+        "candidate_games": total_candidates,
         "newly_processed_game_ids": sorted(newly_processed),
         "newly_processed_count": len(newly_processed),
         "processed_game_ids_count": len(processed_game_ids),
+        "failed_game_ids": failed_game_ids,
+        "failed_games_count": len(failed_game_ids),
     }
 
 
