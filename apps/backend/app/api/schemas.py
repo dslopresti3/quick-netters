@@ -37,6 +37,7 @@ class TeamProjectionLeader(APIModel):
     player_id: str
     player_name: str
     player_team: str | None = None
+    team_name: str | None = None
     model_probability: float
 
 
@@ -76,6 +77,7 @@ class Recommendation(APIModel):
     player_id: str
     player_name: str
     player_team: str | None = None
+    team_name: str | None = None
     model_probability: float
     implied_probability: float | None = None
     fair_odds: int

@@ -165,6 +165,7 @@ def test_daily_recommendations_route_uses_injected_recommendation_dependencies()
 
     assert payload.recommendations[0].game_id == "g-custom-vs-test"
     assert payload.recommendations[0].player_id == "p-custom"
+    assert payload.recommendations[0].team_name == "Custom Home"
 
 
 def test_game_recommendations_route_uses_injected_registry() -> None:
@@ -236,6 +237,7 @@ def test_daily_recommendations_route_integrates_with_live_odds_provider() -> Non
 
     assert payload.odds_available is True
     assert payload.recommendations[0].market_odds == 250
+    assert payload.recommendations[0].team_name == "Custom Home"
 
 
 class EmptyScheduleProvider(ScheduleProvider):
