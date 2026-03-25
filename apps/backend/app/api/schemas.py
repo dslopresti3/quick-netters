@@ -39,6 +39,22 @@ class TeamProjectionLeader(APIModel):
     model_probability: float
 
 
+class RecommendationModelDebug(APIModel):
+    stable_baseline: float
+    offensive_tier_multiplier: float
+    stable_component: float
+    recent_process_form: float
+    recent_outcome_form: float
+    recent_process_adjustment: float
+    recent_outcome_adjustment: float
+    model_probability: float
+    fair_odds: int
+    edge: float
+    ev: float
+    confidence_score: float
+    recommendation_score: float
+
+
 class GameSummary(APIModel):
     game_id: str = Field(..., description="Unique game identifier")
     game_time: datetime = Field(..., description="Scheduled start time in UTC")
@@ -64,6 +80,9 @@ class Recommendation(APIModel):
     market_odds: int
     edge: float
     ev: float
+    confidence_score: float | None = None
+    recommendation_score: float | None = None
+    model_debug: RecommendationModelDebug | None = None
     odds_snapshot_at: datetime | None = None
     confidence_tag: ConfidenceTag | None = None
 
