@@ -180,7 +180,7 @@ class TheOddsApiAdapter:
         if not isinstance(outcome, dict):
             return None
 
-        player_name = _extract_string(outcome.get("name"))
+        player_name = _extract_player_label(outcome)
         if player_name is None:
             return None
 
@@ -264,6 +264,27 @@ class LiveOddsProvider(OddsProvider):
         raw_events = self._client.fetch_raw_events(selected_date)
         return self._adapter.normalize(raw_events)
 
+
+
+
+def _extract_player_label(outcome: dict[str, Any]) -> str | None:
+    name = _extract_string(outcome.get("name"))
+    description = _extract_string(outcome.get("description"))
+
+    if name is None:
+        return description
+
+    if _is_generic_outcome_label(name):
+        if description is not None and not _is_generic_outcome_label(description):
+            return description
+        return None
+
+    return name
+
+
+def _is_generic_outcome_label(value: str) -> bool:
+    normalized = " ".join(value.lower().split())
+    return normalized in {"yes", "no", "over", "under"}
 
 def _extract_string(value: Any) -> str | None:
     if isinstance(value, str) and value.strip():

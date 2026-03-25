@@ -8,7 +8,7 @@ from datetime import date, datetime, timezone
 from app.services.identity import name_aliases, team_alias_tokens
 from app.services.recommendation_service import _match_event_to_game, _match_player_to_projection
 from app.services.odds import STALE_ODDS_THRESHOLD, NormalizedPlayerOdds
-from app.services.odds_provider import LiveOddsProvider, TheOddsApiClient, _parse_american_odds
+from app.services.odds_provider import LiveOddsProvider, TheOddsApiClient, _extract_player_label, _parse_american_odds
 from app.services.provider_wiring import build_provider_registry_from_env
 
 
@@ -142,8 +142,8 @@ def run_audit(selected_date: date) -> OddsAuditReport:
                     if not isinstance(outcome, dict):
                         excluded_malformed_odds += 1
                         continue
-                    player_name = outcome.get("name")
-                    if not isinstance(player_name, str) or not player_name.strip():
+                    player_name = _extract_player_label(outcome)
+                    if player_name is None:
                         excluded_malformed_odds += 1
                         continue
                     odds = _parse_american_odds(outcome.get("price"))
