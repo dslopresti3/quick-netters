@@ -112,6 +112,9 @@ class NhlApiActiveRosterRepository:
     def __init__(self) -> None:
         self._cache_by_team_name: dict[str, list[ActiveRosterPlayer]] = {}
 
+    def clear_cache(self) -> None:
+        self._cache_by_team_name.clear()
+
     def active_players_for_team(self, team_name: str) -> list[ActiveRosterPlayer]:
         team_key = team_name.strip().lower()
         cached = self._cache_by_team_name.get(team_key)
@@ -126,6 +129,19 @@ class NhlApiActiveRosterRepository:
         roster_players = fetch_team_roster_current(team_abbrev=team_abbrev)
         rows: list[ActiveRosterPlayer] = []
         for player in roster_players:
+            player_team_abbrev = _normalize_team_abbrev(getattr(player, "active_team_name", None))
+            if player_team_abbrev is not None and player_team_abbrev != team_abbrev:
+                logger.info(
+                    "Skipping roster player with mismatched current team",
+                    extra={
+                        "requested_team_name": team_name,
+                        "requested_team_abbrev": team_abbrev,
+                        "player_id": player.player_id,
+                        "player_name": player.player_name,
+                        "player_active_team": getattr(player, "active_team_name", None),
+                    },
+                )
+                continue
             rows.append(
                 ActiveRosterPlayer(
                     player_id=player.player_id,
@@ -186,7 +202,7 @@ _DEFAULT_TEMPLATE = _ProjectionTemplate(
     min_player_share_floor=0.001,
 )
 _GOALIE_POSITION_CODES = {"G", "GOALIE", "GK"}
-_FORWARD_POSITION_CODES = {"C", "LW", "RW", "F"}
+_FORWARD_POSITION_CODES = {"C", "LW", "RW", "L", "R", "W", "F", "FWD"}
 
 
 class AutoGeneratingProjectionProvider(ProjectionProvider):
@@ -212,6 +228,13 @@ class AutoGeneratingProjectionProvider(ProjectionProvider):
         scheduled_games = self._schedule_provider.fetch(selected_date)
         if not scheduled_games:
             return []
+        should_force_refresh_today = selected_date == date.today()
+        if should_force_refresh_today:
+            self._generated_cache_by_date.pop(selected_date, None)
+            if hasattr(self._roster_repository, "clear_cache"):
+                clear_cache = getattr(self._roster_repository, "clear_cache")
+                if callable(clear_cache):
+                    clear_cache()
         if _are_projection_rows_older_than_first_goal_store(self._artifact_path, selected_date):
             logger.info(
                 "games projection cache invalidated by historical first-goal store update",
@@ -226,7 +249,7 @@ class AutoGeneratingProjectionProvider(ProjectionProvider):
         }
 
         cached_generated = self._generated_cache_by_date.get(selected_date)
-        if cached_generated is not None:
+        if not should_force_refresh_today and cached_generated is not None:
             if _rows_match_scheduled_slate(
                 rows=cached_generated,
                 valid_game_ids=valid_game_ids,
@@ -252,7 +275,7 @@ class AutoGeneratingProjectionProvider(ProjectionProvider):
             self._generated_cache_by_date.pop(selected_date, None)
 
         cached_artifact_rows = _load_projection_rows_for_date_from_artifact(self._artifact_path, selected_date)
-        if cached_artifact_rows:
+        if not should_force_refresh_today and cached_artifact_rows:
             if _is_stale_projection_snapshot(cached_artifact_rows) or not _rows_match_scheduled_slate(
                 rows=cached_artifact_rows,
                 valid_game_ids=valid_game_ids,
@@ -424,8 +447,7 @@ def _filter_and_prioritize_roster(players: list[ActiveRosterPlayer], projected_t
         and player.active_team_name.strip().lower() == projected_team_name.strip().lower()
         and not _is_goalie(player.position_code)
     ]
-    forwards = [player for player in eligible if _is_forward(player.position_code)]
-    return forwards if forwards else eligible
+    return eligible
 
 
 def _is_goalie(position_code: str | None) -> bool:
@@ -436,6 +458,18 @@ def _is_goalie(position_code: str | None) -> bool:
 def _is_forward(position_code: str | None) -> bool:
     normalized = _normalize_position_code(position_code)
     return normalized in _FORWARD_POSITION_CODES
+
+
+def _normalize_team_abbrev(team_value: Any) -> str | None:
+    if not isinstance(team_value, str):
+        return None
+    normalized = team_value.strip()
+    if not normalized:
+        return None
+    upper = normalized.upper()
+    if len(upper) == 3 and upper.isalpha():
+        return upper
+    return team_abbrev_for_name(normalized)
 
 
 def _generate_candidates_from_eligible_player_pool(
