@@ -2,6 +2,7 @@ import json
 from datetime import date, datetime, timezone
 from unittest.mock import patch
 
+import pytest
 from app.api.schemas import GameSummary
 from app.services.dev_projection_provider import ActiveRosterRepository, AutoGeneratingProjectionProvider, NhlApiActiveRosterRepository
 from app.services.interfaces import PlayerHistoricalProduction, ScheduleProvider
@@ -751,6 +752,234 @@ def test_team_layer_probabilities_favor_stronger_offense_and_weaker_opponent_def
     high_team_prob = sum(row.model_probability for row in rows if row.projected_team_name == "High Octane")
     low_team_prob = sum(row.model_probability for row in rows if row.projected_team_name == "Low Event")
     assert high_team_prob > low_team_prob
+
+
+def test_recent_spike_does_not_overwhelm_stable_player_baseline(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(artifact, [])
+    selected_date = date(2026, 3, 24)
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026032406",
+                    game_time=datetime(2026, 3, 24, 23, 0, tzinfo=timezone.utc),
+                    away_team="Balanced Team",
+                    home_team="Opponent Team",
+                )
+            ]
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(
+        json.dumps(
+            {
+                "players": [
+                    {"player_id": "stable-1", "player_name": "Stable Producer", "active_team_name": "Balanced Team", "is_active_roster": True, "position_code": "C"},
+                    {"player_id": "spike-1", "player_name": "Spike Producer", "active_team_name": "Balanced Team", "is_active_roster": True, "position_code": "LW"},
+                    {"player_id": "opp-1", "player_name": "Opp One", "active_team_name": "Opponent Team", "is_active_roster": True, "position_code": "C"},
+                    {"player_id": "opp-2", "player_name": "Opp Two", "active_team_name": "Opponent Team", "is_active_roster": True, "position_code": "LW"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    history = {
+        "stable-1": PlayerHistoricalProduction(
+            season_first_goals=7,
+            season_total_goals=30,
+            season_total_shots=210,
+            season_games_played=70,
+            recent_5_first_goals=1,
+            recent_10_first_goals=1,
+            recent_5_total_shots=18,
+            recent_10_total_shots=34,
+        ),
+        "spike-1": PlayerHistoricalProduction(
+            season_first_goals=1,
+            season_total_goals=8,
+            season_total_shots=65,
+            season_games_played=70,
+            recent_5_first_goals=3,
+            recent_10_first_goals=4,
+            recent_5_total_shots=7,
+            recent_10_total_shots=12,
+        ),
+        "opp-1": PlayerHistoricalProduction(season_first_goals=3, season_total_goals=14, season_total_shots=120, season_games_played=70),
+        "opp-2": PlayerHistoricalProduction(season_first_goals=2, season_total_goals=12, season_total_shots=100, season_games_played=70),
+    }
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=ActiveRosterRepository(roster_path=roster_path),
+        history_loader=lambda _date, _ids, _path: history,
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+    stable = next(row for row in rows if row.nhl_player_id == "stable-1")
+    spike = next(row for row in rows if row.nhl_player_id == "spike-1")
+    assert stable.model_probability > spike.model_probability
+
+
+def test_recent_history_merge_uses_latest_values_instead_of_peak_max(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {
+                "date": "2026-03-20",
+                "game_id": "g1",
+                "nhl_player_id": "p1",
+                "player_id": "p1",
+                "player_name": "Player One",
+                "team_name": "Team A",
+                "active_team_name": "Team A",
+                "is_active_roster": True,
+                "model_probability": 0.1,
+                "historical_season_first_goals": 6,
+                "historical_season_games_played": 70,
+                "historical_recent_5_first_goals": 4,
+                "historical_recent_10_first_goals": 5,
+            },
+            {
+                "date": "2026-03-24",
+                "game_id": "g2",
+                "nhl_player_id": "p1",
+                "player_id": "p1",
+                "player_name": "Player One",
+                "team_name": "Team A",
+                "active_team_name": "Team A",
+                "is_active_roster": True,
+                "model_probability": 0.1,
+                "historical_season_first_goals": 6,
+                "historical_season_games_played": 70,
+                "historical_recent_5_first_goals": 1,
+                "historical_recent_10_first_goals": 2,
+            },
+        ],
+    )
+
+    from app.services.dev_projection_provider import _load_player_first_goal_history_from_artifact
+
+    history = _load_player_first_goal_history_from_artifact(
+        selected_date=date(2026, 3, 25),
+        eligible_player_ids={"p1"},
+        path=artifact,
+    )
+
+    assert history["p1"].recent_5_first_goals == 1
+    assert history["p1"].recent_10_first_goals == 2
+
+
+def test_team_recent_form_is_dampened_and_cannot_dominate_team_probability(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(artifact, [])
+    selected_date = date(2026, 3, 25)
+    schedule_provider = _StaticScheduleProvider(
+        {
+            selected_date: [
+                GameSummary(
+                    game_id="2026032501",
+                    game_time=datetime(2026, 3, 25, 23, 0, tzinfo=timezone.utc),
+                    away_team="Stable Team",
+                    home_team="Hot Team",
+                )
+            ]
+        }
+    )
+    roster_path = tmp_path / "rosters.json"
+    roster_path.write_text(
+        json.dumps(
+            {
+                "players": [
+                    {"player_id": "s1", "player_name": "Stable One", "active_team_name": "Stable Team", "is_active_roster": True, "position_code": "C"},
+                    {"player_id": "s2", "player_name": "Stable Two", "active_team_name": "Stable Team", "is_active_roster": True, "position_code": "LW"},
+                    {"player_id": "h1", "player_name": "Hot One", "active_team_name": "Hot Team", "is_active_roster": True, "position_code": "C"},
+                    {"player_id": "h2", "player_name": "Hot Two", "active_team_name": "Hot Team", "is_active_roster": True, "position_code": "LW"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    history = {
+        # stronger stable baseline
+        "s1": PlayerHistoricalProduction(season_first_goals=6, season_total_goals=32, season_total_shots=220, season_games_played=70, recent_5_total_shots=8, recent_10_total_shots=16),
+        "s2": PlayerHistoricalProduction(season_first_goals=5, season_total_goals=28, season_total_shots=200, season_games_played=70, recent_5_total_shots=8, recent_10_total_shots=16),
+        # weaker baseline but inflated recent activity
+        "h1": PlayerHistoricalProduction(season_first_goals=2, season_total_goals=14, season_total_shots=110, season_games_played=70, recent_5_total_shots=35, recent_10_total_shots=60, recent_5_first_goals=3, recent_10_first_goals=4),
+        "h2": PlayerHistoricalProduction(season_first_goals=1, season_total_goals=11, season_total_shots=95, season_games_played=70, recent_5_total_shots=30, recent_10_total_shots=55, recent_5_first_goals=2, recent_10_first_goals=3),
+    }
+    provider = AutoGeneratingProjectionProvider(
+        schedule_provider=schedule_provider,
+        artifact_path=artifact,
+        roster_repository=ActiveRosterRepository(roster_path=roster_path),
+        history_loader=lambda _date, _ids, _path: history,
+    )
+
+    rows = provider.fetch_player_first_goal_projections(selected_date)
+    stable_team_prob = sum(row.model_probability for row in rows if row.projected_team_name == "Stable Team")
+    hot_team_prob = sum(row.model_probability for row in rows if row.projected_team_name == "Hot Team")
+
+    assert stable_team_prob > hot_team_prob
+
+
+def test_recent_forms_are_hard_clamped_before_scoring() -> None:
+    from app.services.dev_projection_provider import _player_model_features
+
+    features = _player_model_features(
+        PlayerHistoricalProduction(
+            season_games_played=10,
+            season_total_shots=20,
+            recent_5_total_shots=500,
+            recent_10_total_shots=1000,
+            recent_5_first_period_shots=200,
+            recent_10_first_period_shots=400,
+            recent_5_first_goals=20,
+            recent_10_first_goals=40,
+            recent_5_total_goals=30,
+            recent_10_total_goals=60,
+        )
+    )
+
+    assert features.recent_process_form <= 2.0
+    assert features.recent_outcome_form <= 0.8
+
+
+def test_recent_adjustments_are_added_after_stable_multiplier() -> None:
+    from app.services.dev_projection_provider import _DEFAULT_TEMPLATE, _player_first_goal_score
+    from app.services.dev_projection_provider import _PlayerModelFeatures
+
+    base_features = _PlayerModelFeatures(
+        first_goals_per_game=0.06,
+        goals_per_game=0.30,
+        first_period_goals_per_game=0.08,
+        first_period_shots_per_game=0.20,
+        shots_per_game=3.0,
+        recent_process_form=0.0,
+        recent_outcome_form=0.0,
+        stability_score=1.0,
+        offensive_tier_multiplier=1.8,
+    )
+    hot_recent = _PlayerModelFeatures(
+        first_goals_per_game=0.06,
+        goals_per_game=0.30,
+        first_period_goals_per_game=0.08,
+        first_period_shots_per_game=0.20,
+        shots_per_game=3.0,
+        recent_process_form=2.0,
+        recent_outcome_form=0.8,
+        stability_score=1.0,
+        offensive_tier_multiplier=1.8,
+    )
+
+    base_score = _player_first_goal_score(base_features, _DEFAULT_TEMPLATE)
+    hot_score = _player_first_goal_score(hot_recent, _DEFAULT_TEMPLATE)
+
+    expected_recent_lift = (
+        _DEFAULT_TEMPLATE.player_recent_process_weight * hot_recent.recent_process_form
+        + _DEFAULT_TEMPLATE.player_recent_outcome_weight * hot_recent.recent_outcome_form
+    )
+    assert hot_score - base_score == pytest.approx(expected_recent_lift, abs=1e-9)
 
 
 def test_no_placeholder_rows_emitted_in_real_mode(tmp_path) -> None:

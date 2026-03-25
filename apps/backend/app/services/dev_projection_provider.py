@@ -135,6 +135,7 @@ class NhlApiActiveRosterRepository:
 
 @dataclass(frozen=True)
 class _ProjectionTemplate:
+    # Team-layer weights (team scores first component)
     team_goals_per_game_weight: float
     team_scores_first_rate_weight: float
     opponent_allows_first_rate_weight: float
@@ -142,32 +143,41 @@ class _ProjectionTemplate:
     home_ice_weight: float
     team_recent_form_weight: float
     team_first_period_weight: float
+    # Player share weights (player scores first conditional on team scoring first)
     player_first_goal_weight: float
     player_total_goal_weight: float
     player_first_period_goal_weight: float
     player_first_period_shot_weight: float
     player_shots_per_game_weight: float
-    player_recent_form_weight: float
-    player_recent_5_form_weight: float
-    player_recent_10_form_weight: float
+    player_recent_process_weight: float
+    player_recent_outcome_weight: float
+    recent_process_shrinkage_games: float
+    recent_outcome_shrinkage_games: float
+    recent_process_form_cap: float
+    recent_outcome_form_cap: float
+    min_player_share_floor: float
 
 
 _DEFAULT_TEMPLATE = _ProjectionTemplate(
-    team_goals_per_game_weight=0.19,
-    team_scores_first_rate_weight=0.26,
-    opponent_allows_first_rate_weight=0.18,
-    opponent_goals_allowed_per_game_weight=0.13,
+    team_goals_per_game_weight=0.23,
+    team_scores_first_rate_weight=0.29,
+    opponent_allows_first_rate_weight=0.19,
+    opponent_goals_allowed_per_game_weight=0.11,
     home_ice_weight=0.08,
-    team_recent_form_weight=0.10,
-    team_first_period_weight=0.16,
-    player_first_goal_weight=0.34,
-    player_total_goal_weight=0.14,
-    player_first_period_goal_weight=0.11,
-    player_first_period_shot_weight=0.08,
-    player_shots_per_game_weight=0.08,
-    player_recent_form_weight=0.10,
-    player_recent_5_form_weight=0.08,
-    player_recent_10_form_weight=0.07,
+    team_recent_form_weight=0.06,
+    team_first_period_weight=0.14,
+    player_first_goal_weight=0.33,
+    player_total_goal_weight=0.18,
+    player_first_period_goal_weight=0.12,
+    player_first_period_shot_weight=0.10,
+    player_shots_per_game_weight=0.16,
+    player_recent_process_weight=0.05,
+    player_recent_outcome_weight=0.015,
+    recent_process_shrinkage_games=24.0,
+    recent_outcome_shrinkage_games=36.0,
+    recent_process_form_cap=2.0,
+    recent_outcome_form_cap=0.8,
+    min_player_share_floor=0.001,
 )
 _GOALIE_POSITION_CODES = {"G", "GOALIE", "GK"}
 _FORWARD_POSITION_CODES = {"C", "LW", "RW", "F"}
@@ -339,9 +349,9 @@ class _PlayerModelFeatures:
     first_period_goals_per_game: float
     first_period_shots_per_game: float
     shots_per_game: float
-    recent_form: float
-    recent_5_form: float
-    recent_10_form: float
+    recent_process_form: float
+    recent_outcome_form: float
+    stability_score: float
     offensive_tier_multiplier: float
 
 
@@ -548,9 +558,9 @@ def _generate_candidates_from_eligible_player_pool(
                     "season_first_period_shots": _history_value(player_historical.season_first_period_shots),
                     "shots_per_game": round(player_features.shots_per_game, 4),
                     "first_period_shots_per_game": round(player_features.first_period_shots_per_game, 4),
-                    "player_recent_form": round(player_features.recent_form, 4),
-                    "player_recent_5_form": round(player_features.recent_5_form, 4),
-                    "player_recent_10_form": round(player_features.recent_10_form, 4),
+                    "player_recent_process_form": round(player_features.recent_process_form, 4),
+                    "player_recent_outcome_form": round(player_features.recent_outcome_form, 4),
+                    "player_stability_score": round(player_features.stability_score, 4),
                     "offensive_tier_multiplier": round(player_features.offensive_tier_multiplier, 4),
                     "player_score_before_normalization": round(player_score, 6),
                     "team_probability": round(team_probability, 6),
@@ -704,6 +714,7 @@ def _load_player_first_goal_history_from_artifact(
         return {}
 
     history: dict[str, PlayerHistoricalProduction] = {}
+    latest_recent_dates_by_player_field: dict[str, dict[str, date]] = {}
     for row in projections:
         if not isinstance(row, dict):
             continue
@@ -729,6 +740,7 @@ def _load_player_first_goal_history_from_artifact(
         recent_10_first_period_goals = _as_float(row.get("historical_recent_10_first_period_goals"))
         recent_5_first_period_shots = _as_float(row.get("historical_recent_5_first_period_shots"))
         recent_10_first_period_shots = _as_float(row.get("historical_recent_10_first_period_shots"))
+        row_date = _as_iso_date(row.get("date"))
         if first_goals is None and games_played is None and total_goals is None and total_shots is None and first_period_goals is None:
             continue
         current = history.get(player_id)
@@ -751,7 +763,96 @@ def _load_player_first_goal_history_from_artifact(
                 recent_5_first_period_shots=recent_5_first_period_shots,
                 recent_10_first_period_shots=recent_10_first_period_shots,
             )
+            latest_recent_dates_by_player_field[player_id] = {
+                key: row_date
+                for key, value in {
+                    "recent_5_first_goals": recent_5_first_goals,
+                    "recent_10_first_goals": recent_10_first_goals,
+                    "recent_5_total_goals": recent_5_total_goals,
+                    "recent_10_total_goals": recent_10_total_goals,
+                    "recent_5_total_shots": recent_5_total_shots,
+                    "recent_10_total_shots": recent_10_total_shots,
+                    "recent_5_first_period_goals": recent_5_first_period_goals,
+                    "recent_10_first_period_goals": recent_10_first_period_goals,
+                    "recent_5_first_period_shots": recent_5_first_period_shots,
+                    "recent_10_first_period_shots": recent_10_first_period_shots,
+                }.items()
+                if value is not None and row_date is not None
+            }
             continue
+
+        field_dates = latest_recent_dates_by_player_field.setdefault(player_id, {})
+        resolved_recent_5_first_goals = _prefer_latest_recent_value(
+            current_value=current.recent_5_first_goals,
+            current_date=field_dates.get("recent_5_first_goals"),
+            incoming_value=recent_5_first_goals,
+            incoming_date=row_date,
+        )
+        resolved_recent_10_first_goals = _prefer_latest_recent_value(
+            current_value=current.recent_10_first_goals,
+            current_date=field_dates.get("recent_10_first_goals"),
+            incoming_value=recent_10_first_goals,
+            incoming_date=row_date,
+        )
+        resolved_recent_5_total_goals = _prefer_latest_recent_value(
+            current_value=current.recent_5_total_goals,
+            current_date=field_dates.get("recent_5_total_goals"),
+            incoming_value=recent_5_total_goals,
+            incoming_date=row_date,
+        )
+        resolved_recent_10_total_goals = _prefer_latest_recent_value(
+            current_value=current.recent_10_total_goals,
+            current_date=field_dates.get("recent_10_total_goals"),
+            incoming_value=recent_10_total_goals,
+            incoming_date=row_date,
+        )
+        resolved_recent_5_total_shots = _prefer_latest_recent_value(
+            current_value=current.recent_5_total_shots,
+            current_date=field_dates.get("recent_5_total_shots"),
+            incoming_value=recent_5_total_shots,
+            incoming_date=row_date,
+        )
+        resolved_recent_10_total_shots = _prefer_latest_recent_value(
+            current_value=current.recent_10_total_shots,
+            current_date=field_dates.get("recent_10_total_shots"),
+            incoming_value=recent_10_total_shots,
+            incoming_date=row_date,
+        )
+        resolved_recent_5_first_period_goals = _prefer_latest_recent_value(
+            current_value=current.recent_5_first_period_goals,
+            current_date=field_dates.get("recent_5_first_period_goals"),
+            incoming_value=recent_5_first_period_goals,
+            incoming_date=row_date,
+        )
+        resolved_recent_10_first_period_goals = _prefer_latest_recent_value(
+            current_value=current.recent_10_first_period_goals,
+            current_date=field_dates.get("recent_10_first_period_goals"),
+            incoming_value=recent_10_first_period_goals,
+            incoming_date=row_date,
+        )
+        resolved_recent_5_first_period_shots = _prefer_latest_recent_value(
+            current_value=current.recent_5_first_period_shots,
+            current_date=field_dates.get("recent_5_first_period_shots"),
+            incoming_value=recent_5_first_period_shots,
+            incoming_date=row_date,
+        )
+        resolved_recent_10_first_period_shots = _prefer_latest_recent_value(
+            current_value=current.recent_10_first_period_shots,
+            current_date=field_dates.get("recent_10_first_period_shots"),
+            incoming_value=recent_10_first_period_shots,
+            incoming_date=row_date,
+        )
+
+        _update_recent_field_date(field_dates, "recent_5_first_goals", recent_5_first_goals, row_date)
+        _update_recent_field_date(field_dates, "recent_10_first_goals", recent_10_first_goals, row_date)
+        _update_recent_field_date(field_dates, "recent_5_total_goals", recent_5_total_goals, row_date)
+        _update_recent_field_date(field_dates, "recent_10_total_goals", recent_10_total_goals, row_date)
+        _update_recent_field_date(field_dates, "recent_5_total_shots", recent_5_total_shots, row_date)
+        _update_recent_field_date(field_dates, "recent_10_total_shots", recent_10_total_shots, row_date)
+        _update_recent_field_date(field_dates, "recent_5_first_period_goals", recent_5_first_period_goals, row_date)
+        _update_recent_field_date(field_dates, "recent_10_first_period_goals", recent_10_first_period_goals, row_date)
+        _update_recent_field_date(field_dates, "recent_5_first_period_shots", recent_5_first_period_shots, row_date)
+        _update_recent_field_date(field_dates, "recent_10_first_period_shots", recent_10_first_period_shots, row_date)
 
         history[player_id] = PlayerHistoricalProduction(
             season_first_goals=max(_history_value(current.season_first_goals), _history_value(first_goals)),
@@ -760,18 +861,44 @@ def _load_player_first_goal_history_from_artifact(
             season_total_shots=max(_history_value(current.season_total_shots), _history_value(total_shots)),
             season_first_period_goals=max(_history_value(current.season_first_period_goals), _history_value(first_period_goals)),
             season_first_period_shots=max(_history_value(current.season_first_period_shots), _history_value(first_period_shots)),
-            recent_5_first_goals=max(_history_value(current.recent_5_first_goals), _history_value(recent_5_first_goals)),
-            recent_10_first_goals=max(_history_value(current.recent_10_first_goals), _history_value(recent_10_first_goals)),
-            recent_5_total_goals=max(_history_value(current.recent_5_total_goals), _history_value(recent_5_total_goals)),
-            recent_10_total_goals=max(_history_value(current.recent_10_total_goals), _history_value(recent_10_total_goals)),
-            recent_5_total_shots=max(_history_value(current.recent_5_total_shots), _history_value(recent_5_total_shots)),
-            recent_10_total_shots=max(_history_value(current.recent_10_total_shots), _history_value(recent_10_total_shots)),
-            recent_5_first_period_goals=max(_history_value(current.recent_5_first_period_goals), _history_value(recent_5_first_period_goals)),
-            recent_10_first_period_goals=max(_history_value(current.recent_10_first_period_goals), _history_value(recent_10_first_period_goals)),
-            recent_5_first_period_shots=max(_history_value(current.recent_5_first_period_shots), _history_value(recent_5_first_period_shots)),
-            recent_10_first_period_shots=max(_history_value(current.recent_10_first_period_shots), _history_value(recent_10_first_period_shots)),
+            # Recent fields should reflect the latest observed values rather than
+            # preserving historical peaks via max(), which can keep stale hot
+            # streaks alive in later model runs.
+            recent_5_first_goals=resolved_recent_5_first_goals,
+            recent_10_first_goals=resolved_recent_10_first_goals,
+            recent_5_total_goals=resolved_recent_5_total_goals,
+            recent_10_total_goals=resolved_recent_10_total_goals,
+            recent_5_total_shots=resolved_recent_5_total_shots,
+            recent_10_total_shots=resolved_recent_10_total_shots,
+            recent_5_first_period_goals=resolved_recent_5_first_period_goals,
+            recent_10_first_period_goals=resolved_recent_10_first_period_goals,
+            recent_5_first_period_shots=resolved_recent_5_first_period_shots,
+            recent_10_first_period_shots=resolved_recent_10_first_period_shots,
         )
     return history
+
+
+def _prefer_latest_recent_value(
+    current_value: float | None,
+    current_date: date | None,
+    incoming_value: float | None,
+    incoming_date: date | None,
+) -> float | None:
+    if incoming_value is None:
+        return current_value
+    if incoming_date is None:
+        return incoming_value if current_value is None else current_value
+    if current_date is None or incoming_date >= current_date:
+        return incoming_value
+    return current_value
+
+
+def _update_recent_field_date(field_dates: dict[str, date], field_name: str, incoming_value: float | None, incoming_date: date | None) -> None:
+    if incoming_value is None or incoming_date is None:
+        return
+    existing = field_dates.get(field_name)
+    if existing is None or incoming_date >= existing:
+        field_dates[field_name] = incoming_date
 
 
 def load_player_first_goal_history_from_nhl_api(
@@ -871,7 +998,6 @@ def _player_model_features(player_historical: PlayerHistoricalProduction) -> _Pl
     first_period_goals_per_game = _history_value(player_historical.season_first_period_goals) / games_played
     first_period_shots_per_game = _history_value(player_historical.season_first_period_shots) / games_played
     shots_per_game = _history_value(player_historical.season_total_shots) / games_played
-    recent_form = 0.65 * first_goals_per_game + 0.35 * goals_per_game
     recent_5_games = min(5.0, games_played)
     recent_10_games = min(10.0, games_played)
     recent_5_first_goals_per_game = _history_value(player_historical.recent_5_first_goals) / max(recent_5_games, 1.0)
@@ -884,28 +1010,26 @@ def _player_model_features(player_historical: PlayerHistoricalProduction) -> _Pl
     recent_10_first_period_goals_per_game = _history_value(player_historical.recent_10_first_period_goals) / max(recent_10_games, 1.0)
     recent_5_first_period_shots_per_game = _history_value(player_historical.recent_5_first_period_shots) / max(recent_5_games, 1.0)
     recent_10_first_period_shots_per_game = _history_value(player_historical.recent_10_first_period_shots) / max(recent_10_games, 1.0)
-    recent_5_form = (
-        0.42 * recent_5_first_goals_per_game
-        + 0.28 * recent_5_goals_per_game
-        + 0.18 * recent_5_shots_per_game
-        + 0.07 * recent_5_first_period_goals_per_game
-        + 0.05 * recent_5_first_period_shots_per_game
-    )
-    recent_10_form = (
-        0.45 * recent_10_first_goals_per_game
-        + 0.25 * recent_10_goals_per_game
-        + 0.20 * recent_10_shots_per_game
-        + 0.06 * recent_10_first_period_goals_per_game
-        + 0.04 * recent_10_first_period_shots_per_game
-    )
+    recent_5_process = (0.68 * recent_5_shots_per_game) + (0.32 * recent_5_first_period_shots_per_game)
+    recent_10_process = (0.68 * recent_10_shots_per_game) + (0.32 * recent_10_first_period_shots_per_game)
+    raw_recent_process_form = (0.6 * recent_10_process) + (0.4 * recent_5_process)
+    recent_5_outcome = (0.68 * recent_5_first_goals_per_game) + (0.32 * recent_5_goals_per_game)
+    recent_10_outcome = (0.68 * recent_10_first_goals_per_game) + (0.32 * recent_10_goals_per_game)
+    raw_recent_outcome_form = (0.65 * recent_10_outcome) + (0.35 * recent_5_outcome)
+    # Clamp recent form signals so short-sample spikes are bounded before they
+    # reach player scoring. Process is allowed a wider cap than outcomes.
+    recent_process_form = min(max(raw_recent_process_form, 0.0), _DEFAULT_TEMPLATE.recent_process_form_cap)
+    recent_outcome_form = min(max(raw_recent_outcome_form, 0.0), _DEFAULT_TEMPLATE.recent_outcome_form_cap)
+    stability_score = min(1.0, games_played / 60.0)
+    # IMPORTANT: keep offensive tier anchored to stable season-long signals only.
+    # Recent form is applied once later as a bounded additive adjustment in
+    # _player_first_goal_score to avoid double counting recent performance.
     offensive_index = (
-        2.2 * first_goals_per_game
-        + 1.0 * goals_per_game
-        + 0.45 * shots_per_game
+        2.0 * first_goals_per_game
+        + 1.05 * goals_per_game
+        + 0.6 * shots_per_game
         + 0.35 * first_period_goals_per_game
         + 0.25 * first_period_shots_per_game
-        + 0.8 * recent_5_form
-        + 0.6 * recent_10_form
     )
     offensive_tier_multiplier = min(1.85, max(0.45, 0.55 + (1.05 * offensive_index)))
     return _PlayerModelFeatures(
@@ -914,25 +1038,28 @@ def _player_model_features(player_historical: PlayerHistoricalProduction) -> _Pl
         first_period_goals_per_game=first_period_goals_per_game,
         first_period_shots_per_game=first_period_shots_per_game,
         shots_per_game=shots_per_game,
-        recent_form=recent_form,
-        recent_5_form=recent_5_form,
-        recent_10_form=recent_10_form,
+        recent_process_form=recent_process_form,
+        recent_outcome_form=recent_outcome_form,
+        stability_score=stability_score,
         offensive_tier_multiplier=offensive_tier_multiplier,
     )
 
 
 def _player_first_goal_score(player_features: _PlayerModelFeatures, template: _ProjectionTemplate) -> float:
-    baseline = (
+    stable_baseline = (
         template.player_first_goal_weight * player_features.first_goals_per_game
         + template.player_total_goal_weight * player_features.goals_per_game
         + template.player_first_period_goal_weight * player_features.first_period_goals_per_game
         + template.player_first_period_shot_weight * player_features.first_period_shots_per_game
         + template.player_shots_per_game_weight * player_features.shots_per_game
-        + template.player_recent_form_weight * player_features.recent_form
-        + template.player_recent_5_form_weight * player_features.recent_5_form
-        + template.player_recent_10_form_weight * player_features.recent_10_form
     )
-    return max(baseline * player_features.offensive_tier_multiplier, 0.0)
+    process_weight = player_features.stability_score / max(template.recent_process_shrinkage_games / 60.0, 1.0)
+    outcome_weight = player_features.stability_score / max(template.recent_outcome_shrinkage_games / 60.0, 1.0)
+    recent_process_adjustment = template.player_recent_process_weight * process_weight * player_features.recent_process_form
+    recent_outcome_adjustment = template.player_recent_outcome_weight * outcome_weight * player_features.recent_outcome_form
+    stable_component = stable_baseline * player_features.offensive_tier_multiplier
+    adjusted = stable_component + recent_process_adjustment + recent_outcome_adjustment
+    return max(adjusted, template.min_player_share_floor)
 
 
 def _team_goals_per_game(
@@ -968,8 +1095,12 @@ def _team_recent_scoring_form(
             ),
         )
         features = _player_model_features(historical)
-        recent_form_values.append((0.35 * features.recent_form) + (0.45 * features.recent_5_form) + (0.20 * features.recent_10_form))
-    return sum(recent_form_values)
+        recent_form_values.append((0.8 * features.recent_process_form) + (0.2 * features.recent_outcome_form))
+    # Keep team recent modifier bounded and scale-stable across lineup sizes.
+    # We use average per-player recent form (not sum) and clamp to [0, 1] so
+    # this term stays a small contextual adjustment.
+    average_recent_form = sum(recent_form_values) / max(len(recent_form_values), 1)
+    return min(max(average_recent_form, 0.0), 1.0)
 
 
 def _team_scores_first_rate(
@@ -1186,6 +1317,15 @@ def _as_float(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
     return None
+
+
+def _as_iso_date(value: Any) -> date | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return date.fromisoformat(value.strip())
+    except ValueError:
+        return None
 
 
 def _normalize_position_code(value: Any) -> str | None:

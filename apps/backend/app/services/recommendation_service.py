@@ -5,7 +5,8 @@ import logging
 import os
 from zoneinfo import ZoneInfo
 
-from app.api.schemas import GameSummary, Recommendation, TeamProjectionLeader
+from app.api.schemas import GameSummary, Recommendation, RecommendationModelDebug, TeamProjectionLeader
+from app.services.dev_projection_provider import _DEFAULT_TEMPLATE, _is_goalie, _player_model_features
 from app.services.identity import name_aliases, normalize_name, normalize_team_token, team_alias_tokens
 from app.services.interfaces import (
     AvailabilityProvider,
@@ -15,7 +16,6 @@ from app.services.interfaces import (
     RecommendationsProvider,
     ScheduleProvider,
 )
-from app.services.dev_projection_provider import _is_goalie
 from app.services.odds import (
     NormalizedPlayerOdds,
     OddsEventMapping,
@@ -28,6 +28,11 @@ from app.services.odds import (
 
 logger = logging.getLogger(__name__)
 DEFAULT_EVENT_MATCH_TIMEZONE = "America/New_York"
+_SCORE_WEIGHTS = {
+    "probability": 0.5,
+    "value": 0.3,
+    "confidence": 0.20,
+}
 
 
 class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
@@ -198,6 +203,18 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
             if edge <= 0:
                 continue
 
+            confidence_score = _confidence_score(
+                projection=projection,
+                market_odds=odds_snapshot.market_odds_american,
+            )
+            recommendation_score = _recommendation_score(
+                probability=projection.model_probability,
+                edge=edge,
+                ev=ev,
+                market_odds=odds_snapshot.market_odds_american,
+                confidence_score=confidence_score,
+            )
+
             recommendations.append(
                 Recommendation(
                     game_id=game_id,
@@ -211,13 +228,35 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
                     market_odds=odds_snapshot.market_odds_american,
                     edge=round(edge, 4),
                     ev=round(ev, 4),
+                    confidence_score=round(confidence_score, 4),
+                    recommendation_score=round(recommendation_score, 4),
+                    model_debug=(
+                        _build_model_debug_payload(
+                            projection=projection,
+                            fair_odds=fair_odds,
+                            edge=edge,
+                            ev=ev,
+                            confidence_score=confidence_score,
+                            recommendation_score=recommendation_score,
+                        )
+                        if _debug_transparency_enabled()
+                        else None
+                    ),
                     implied_probability=round(implied_probability, 4),
                     odds_snapshot_at=odds_snapshot.snapshot_at,
-                    confidence_tag=_confidence_tag(ev),
+                    confidence_tag=_confidence_tag(ev, confidence_score),
                 )
             )
 
-        return sorted(recommendations, key=lambda rec: (rec.ev, rec.edge, rec.model_probability), reverse=True)
+        return sorted(
+            recommendations,
+            key=lambda rec: (
+                rec.recommendation_score or 0.0,
+                rec.model_probability,
+                rec.ev,
+            ),
+            reverse=True,
+        )
 
     def _eligible_projection_candidates(self, selected_date: date, games: list[GameSummary] | None) -> list[PlayerProjectionCandidate]:
         projection_rows = self._projection_rows_for_date(selected_date)
@@ -543,12 +582,123 @@ def _latest_snapshot_for_player(
     return max(candidates, key=lambda snapshot: snapshot.snapshot_at)
 
 
-def _confidence_tag(ev: float) -> str:
-    if ev >= 0.06:
+def _confidence_tag(ev: float, confidence_score: float) -> str:
+    if ev >= 0.06 and confidence_score >= 0.65:
         return "high"
-    if ev >= 0.03:
+    if ev >= 0.03 and confidence_score >= 0.45:
         return "medium"
     return "watch"
+
+
+def _recommendation_score(probability: float, edge: float, ev: float, market_odds: int, confidence_score: float) -> float:
+    # Smoothly scale components to avoid hard top-end saturation from clipped
+    # min/max bounds while still keeping the score interpretable in [0, 100].
+    probability_component = _saturating_component(probability, half_saturation=0.14)
+    ev_component = _saturating_component(ev, half_saturation=1.0)
+    edge_component = _saturating_component(edge, half_saturation=0.18)
+    value_component = (0.65 * ev_component) + (0.35 * edge_component)
+    value_component *= _long_odds_value_dampener(probability=probability, market_odds=market_odds)
+    combined = (
+        (_SCORE_WEIGHTS["probability"] * probability_component)
+        + (_SCORE_WEIGHTS["value"] * value_component)
+        + (_SCORE_WEIGHTS["confidence"] * confidence_score)
+    )
+    return round(100 * combined, 4)
+
+
+def _confidence_score(projection: PlayerProjectionCandidate, market_odds: int) -> float:
+    history = projection.historical_production
+    games_played = max(0.0, float(history.season_games_played or 0.0))
+    shots_per_game = (float(history.season_total_shots or 0.0) / games_played) if games_played > 0 else 0.0
+    first_goal_rate = (float(history.season_first_goals or 0.0) / games_played) if games_played > 0 else 0.0
+    recent_5_first_goal_rate = (float(history.recent_5_first_goals or 0.0) / min(5.0, games_played)) if games_played > 0 else 0.0
+    recent_10_first_goal_rate = (float(history.recent_10_first_goals or 0.0) / min(10.0, games_played)) if games_played > 0 else 0.0
+
+    sample_score = _bounded_scale(games_played, floor=8.0, ceiling=65.0)
+    process_score = _bounded_scale(shots_per_game, floor=0.8, ceiling=4.0)
+    role_score = _bounded_scale(projection.model_probability, floor=0.01, ceiling=0.16)
+
+    recent_spike = max(0.0, recent_5_first_goal_rate - first_goal_rate) + max(0.0, recent_10_first_goal_rate - first_goal_rate)
+    recency_penalty = _bounded_scale(recent_spike, floor=0.0, ceiling=0.45)
+
+    extreme_longshot_penalty = 0.0
+    if market_odds >= 900 and projection.model_probability < 0.03:
+        extreme_longshot_penalty = _bounded_scale(float(market_odds), floor=900.0, ceiling=2500.0)
+
+    confidence = (
+        (0.42 * sample_score)
+        + (0.33 * process_score)
+        + (0.25 * role_score)
+        - (0.16 * recency_penalty)
+        - (0.14 * extreme_longshot_penalty)
+    )
+    return max(0.05, min(0.99, confidence))
+
+
+def _bounded_scale(value: float, floor: float, ceiling: float) -> float:
+    if ceiling <= floor:
+        return 0.0
+    clipped = min(max(value, floor), ceiling)
+    return (clipped - floor) / (ceiling - floor)
+
+
+def _saturating_component(value: float, half_saturation: float) -> float:
+    if value <= 0 or half_saturation <= 0:
+        return 0.0
+    return value / (value + half_saturation)
+
+
+def _long_odds_value_dampener(probability: float, market_odds: int) -> float:
+    if market_odds <= 1200:
+        return 1.0
+    odds_excess = max(0.0, float(market_odds - 1200))
+    odds_scale = _saturating_component(odds_excess, half_saturation=1200.0)
+    probability_weakness = _bounded_scale(0.22 - probability, floor=0.0, ceiling=0.12)
+    penalty = 0.16 * odds_scale * probability_weakness
+    return max(0.82, 1.0 - penalty)
+
+
+def _debug_transparency_enabled() -> bool:
+    return os.getenv("RECOMMENDATION_DEBUG_FIELDS", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _build_model_debug_payload(
+    projection: PlayerProjectionCandidate,
+    fair_odds: int,
+    edge: float,
+    ev: float,
+    confidence_score: float,
+    recommendation_score: float,
+) -> RecommendationModelDebug:
+    features = _player_model_features(projection.historical_production)
+    stable_baseline = (
+        _DEFAULT_TEMPLATE.player_first_goal_weight * features.first_goals_per_game
+        + _DEFAULT_TEMPLATE.player_total_goal_weight * features.goals_per_game
+        + _DEFAULT_TEMPLATE.player_first_period_goal_weight * features.first_period_goals_per_game
+        + _DEFAULT_TEMPLATE.player_first_period_shot_weight * features.first_period_shots_per_game
+        + _DEFAULT_TEMPLATE.player_shots_per_game_weight * features.shots_per_game
+    )
+    process_weight = features.stability_score / max(_DEFAULT_TEMPLATE.recent_process_shrinkage_games / 60.0, 1.0)
+    outcome_weight = features.stability_score / max(_DEFAULT_TEMPLATE.recent_outcome_shrinkage_games / 60.0, 1.0)
+    recent_process_adjustment = _DEFAULT_TEMPLATE.player_recent_process_weight * process_weight * features.recent_process_form
+    recent_outcome_adjustment = _DEFAULT_TEMPLATE.player_recent_outcome_weight * outcome_weight * features.recent_outcome_form
+    stable_component = stable_baseline * features.offensive_tier_multiplier
+
+    return RecommendationModelDebug(
+        stable_baseline=round(stable_baseline, 6),
+        offensive_tier_multiplier=round(features.offensive_tier_multiplier, 6),
+        stable_component=round(stable_component, 6),
+        recent_process_form=round(features.recent_process_form, 6),
+        recent_outcome_form=round(features.recent_outcome_form, 6),
+        recent_process_adjustment=round(recent_process_adjustment, 6),
+        recent_outcome_adjustment=round(recent_outcome_adjustment, 6),
+        model_probability=round(projection.model_probability, 6),
+        fair_odds=fair_odds,
+        edge=round(edge, 6),
+        ev=round(ev, 6),
+        confidence_score=round(confidence_score, 6),
+        recommendation_score=round(recommendation_score, 6),
+    )
 
 
 def _event_start_delta_seconds(provider_start_time: datetime, canonical_start_time: datetime, local_timezone_name: str) -> int:

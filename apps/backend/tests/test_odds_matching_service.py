@@ -1,4 +1,5 @@
 from datetime import date, datetime, time, timedelta, timezone
+import os
 
 from app.api.schemas import GameSummary
 from app.services.interfaces import (
@@ -457,6 +458,94 @@ def test_recommendation_fields_include_implied_probability_fair_odds_edge_and_ev
     assert rec.fair_odds == 355
     assert rec.edge == 0.02
     assert rec.ev == 0.1
+    assert rec.confidence_score is not None
+    assert rec.recommendation_score is not None
+
+
+def test_recommendation_ranking_balances_probability_value_and_confidence() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026020101", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
+    projections = [
+        PlayerProjectionCandidate(
+            game_id="2026020101",
+            nhl_player_id="stable-topline",
+            player_name="Stable Topline",
+            projected_team_name="NY Rangers",
+            model_probability=0.12,
+            historical_production=PlayerHistoricalProduction(
+                season_first_goals=6,
+                season_games_played=72,
+                season_total_shots=235,
+                recent_5_first_goals=1,
+                recent_10_first_goals=1,
+            ),
+            roster_eligibility=PlayerRosterEligibility(active_team_name="NY Rangers", is_active_roster=True),
+        ),
+        PlayerProjectionCandidate(
+            game_id="2026020101",
+            nhl_player_id="fringe-longshot",
+            player_name="Fringe Longshot",
+            projected_team_name="NY Rangers",
+            model_probability=0.02,
+            historical_production=PlayerHistoricalProduction(
+                season_first_goals=1,
+                season_games_played=12,
+                season_total_shots=10,
+                recent_5_first_goals=1,
+                recent_10_first_goals=1,
+            ),
+            roster_eligibility=PlayerRosterEligibility(active_team_name="NY Rangers", is_active_roster=True),
+        ),
+    ]
+    odds_rows = [
+        NormalizedPlayerOdds(
+            nhl_game_id="2026020101",
+            nhl_player_id="stable-topline",
+            market_odds_american=900,
+            snapshot_at=game_time - timedelta(minutes=5),
+            provider_name="test",
+            provider_event_id="evt-1",
+            provider_player_name_raw="Stable Topline",
+            provider_team_raw="NY Rangers",
+            away_team_raw="NY Rangers",
+            home_team_raw="Boston Bruins",
+            provider_start_time=game_time,
+            freshness_status="fresh",
+            is_fresh=True,
+            event_mapping=None,
+            player_mapping=None,
+        ),
+        NormalizedPlayerOdds(
+            nhl_game_id="2026020101",
+            nhl_player_id="fringe-longshot",
+            market_odds_american=7000,
+            snapshot_at=game_time - timedelta(minutes=5),
+            provider_name="test",
+            provider_event_id="evt-2",
+            provider_player_name_raw="Fringe Longshot",
+            provider_team_raw="NY Rangers",
+            away_team_raw="NY Rangers",
+            home_team_raw="Boston Bruins",
+            provider_start_time=game_time,
+            freshness_status="fresh",
+            is_fresh=True,
+            event_mapping=None,
+            player_mapping=None,
+        ),
+    ]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    recs = service.fetch_daily(selected_date)
+
+    assert len(recs) == 2
+    assert recs[0].player_id == "stable-topline"
+    assert (recs[0].recommendation_score or 0) > (recs[1].recommendation_score or 0)
 
 
 def test_event_mapping_matches_when_provider_start_time_has_non_utc_offset() -> None:
@@ -474,3 +563,197 @@ def test_event_mapping_matches_when_provider_start_time_has_non_utc_offset() -> 
     )
 
     assert service.odds_available(selected_date) is True
+
+
+def test_debug_transparency_fields_are_populated_and_stable_component_dominates() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026020201", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
+    projection = PlayerProjectionCandidate(
+        game_id="2026020201",
+        nhl_player_id="847123",
+        player_name="Artemi Panarin",
+        projected_team_name="NY Rangers",
+        model_probability=0.22,
+        historical_production=PlayerHistoricalProduction(
+            season_first_goals=7,
+            season_games_played=70,
+            season_total_goals=35,
+            season_total_shots=220,
+            recent_5_total_shots=20,
+            recent_10_total_shots=35,
+            recent_5_first_goals=1,
+            recent_10_first_goals=1,
+        ),
+        roster_eligibility=PlayerRosterEligibility(active_team_name="NY Rangers", is_active_roster=True),
+    )
+    odds_rows = [_raw_odds("Artemi Panarin", "NY Rangers", "Boston Bruins", game_time, team="NY Rangers")]
+    previous = os.environ.get("RECOMMENDATION_DEBUG_FIELDS")
+    os.environ["RECOMMENDATION_DEBUG_FIELDS"] = "1"
+    try:
+        service = ValueRecommendationService(
+            schedule_provider=StaticScheduleProvider([game]),
+            projection_provider=StaticProjectionProvider([projection]),
+            odds_provider=StaticOddsProvider(odds_rows),
+        )
+        recs = service.fetch_daily(selected_date)
+    finally:
+        if previous is None:
+            os.environ.pop("RECOMMENDATION_DEBUG_FIELDS", None)
+        else:
+            os.environ["RECOMMENDATION_DEBUG_FIELDS"] = previous
+
+    assert len(recs) == 1
+    debug = recs[0].model_debug
+    assert debug is not None
+    assert debug.stable_baseline > 0
+    assert debug.stable_component > 0
+    assert debug.recent_process_adjustment >= 0
+    assert debug.recent_outcome_adjustment >= 0
+    assert debug.stable_component > (debug.recent_process_adjustment + debug.recent_outcome_adjustment)
+
+
+def test_recommendation_score_does_not_flatten_top_plays_into_ties() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026020301", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
+    projections = [
+        PlayerProjectionCandidate(
+            game_id="2026020301",
+            nhl_player_id="elite-star",
+            player_name="Elite Star",
+            projected_team_name="NY Rangers",
+            model_probability=0.34,
+            historical_production=PlayerHistoricalProduction(season_first_goals=10, season_games_played=75, season_total_shots=260),
+            roster_eligibility=PlayerRosterEligibility(active_team_name="NY Rangers", is_active_roster=True),
+        ),
+        PlayerProjectionCandidate(
+            game_id="2026020301",
+            nhl_player_id="value-winger",
+            player_name="Value Winger",
+            projected_team_name="NY Rangers",
+            model_probability=0.23,
+            historical_production=PlayerHistoricalProduction(season_first_goals=6, season_games_played=75, season_total_shots=200),
+            roster_eligibility=PlayerRosterEligibility(active_team_name="NY Rangers", is_active_roster=True),
+        ),
+    ]
+    odds_rows = [
+        NormalizedPlayerOdds(
+            nhl_game_id="2026020301",
+            nhl_player_id="elite-star",
+            market_odds_american=900,
+            snapshot_at=game_time - timedelta(minutes=3),
+            provider_name="test",
+            provider_event_id="evt-elite",
+            provider_player_name_raw="Elite Star",
+            provider_team_raw="NY Rangers",
+            away_team_raw="NY Rangers",
+            home_team_raw="Boston Bruins",
+            provider_start_time=game_time,
+            freshness_status="fresh",
+            is_fresh=True,
+            event_mapping=None,
+            player_mapping=None,
+        ),
+        NormalizedPlayerOdds(
+            nhl_game_id="2026020301",
+            nhl_player_id="value-winger",
+            market_odds_american=1700,
+            snapshot_at=game_time - timedelta(minutes=3),
+            provider_name="test",
+            provider_event_id="evt-value",
+            provider_player_name_raw="Value Winger",
+            provider_team_raw="NY Rangers",
+            away_team_raw="NY Rangers",
+            home_team_raw="Boston Bruins",
+            provider_start_time=game_time,
+            freshness_status="fresh",
+            is_fresh=True,
+            event_mapping=None,
+            player_mapping=None,
+        ),
+    ]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+    recs = service.fetch_daily(selected_date)
+
+    assert len(recs) == 2
+    assert recs[0].recommendation_score != recs[1].recommendation_score
+
+
+def test_long_odds_value_is_mildly_dampened_when_probability_is_weaker() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026020302", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
+    projections = [
+        PlayerProjectionCandidate(
+            game_id="2026020302",
+            nhl_player_id="high-prob",
+            player_name="High Prob Star",
+            projected_team_name="NY Rangers",
+            model_probability=0.29,
+            historical_production=PlayerHistoricalProduction(season_first_goals=9, season_games_played=75, season_total_shots=240),
+            roster_eligibility=PlayerRosterEligibility(active_team_name="NY Rangers", is_active_roster=True),
+        ),
+        PlayerProjectionCandidate(
+            game_id="2026020302",
+            nhl_player_id="long-odds",
+            player_name="Long Odds Winger",
+            projected_team_name="NY Rangers",
+            model_probability=0.17,
+            historical_production=PlayerHistoricalProduction(season_first_goals=5, season_games_played=75, season_total_shots=170),
+            roster_eligibility=PlayerRosterEligibility(active_team_name="NY Rangers", is_active_roster=True),
+        ),
+    ]
+    odds_rows = [
+        NormalizedPlayerOdds(
+            nhl_game_id="2026020302",
+            nhl_player_id="high-prob",
+            market_odds_american=900,
+            snapshot_at=game_time - timedelta(minutes=2),
+            provider_name="test",
+            provider_event_id="evt-high-prob",
+            provider_player_name_raw="High Prob Star",
+            provider_team_raw="NY Rangers",
+            away_team_raw="NY Rangers",
+            home_team_raw="Boston Bruins",
+            provider_start_time=game_time,
+            freshness_status="fresh",
+            is_fresh=True,
+            event_mapping=None,
+            player_mapping=None,
+        ),
+        NormalizedPlayerOdds(
+            nhl_game_id="2026020302",
+            nhl_player_id="long-odds",
+            market_odds_american=2200,
+            snapshot_at=game_time - timedelta(minutes=2),
+            provider_name="test",
+            provider_event_id="evt-long-odds",
+            provider_player_name_raw="Long Odds Winger",
+            provider_team_raw="NY Rangers",
+            away_team_raw="NY Rangers",
+            home_team_raw="Boston Bruins",
+            provider_start_time=game_time,
+            freshness_status="fresh",
+            is_fresh=True,
+            event_mapping=None,
+            player_mapping=None,
+        ),
+    ]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+    recs = service.fetch_daily(selected_date)
+    by_id = {r.player_id: r for r in recs}
+
+    assert by_id["high-prob"].recommendation_score is not None
+    assert by_id["long-odds"].recommendation_score is not None
+    assert by_id["high-prob"].recommendation_score > by_id["long-odds"].recommendation_score
