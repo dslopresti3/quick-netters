@@ -683,6 +683,92 @@ def test_anytime_game_bucket_uses_anytime_probabilities_and_anytime_odds_thresho
     assert underdog.player_id == "p2"
 
 
+def test_anytime_game_bucket_allows_later_game_longer_odds_for_best_bet_and_underdog() -> None:
+    selected_date = date.today()
+    late_game_time = datetime.combine(selected_date, time(23, 30), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026020406", game_time=late_game_time, away_team="Los Angeles Kings", home_team="Vancouver Canucks")
+    projections = [
+        PlayerProjectionCandidate(
+            game_id="2026020406",
+            nhl_player_id="p1",
+            player_name="Anytime Late One",
+            projected_team_name="Los Angeles Kings",
+            model_probability=0.03,
+            first_goal_probability=0.03,
+            anytime_probability=0.22,
+            historical_production=PlayerHistoricalProduction(season_games_played=61, season_first_goals=2),
+            roster_eligibility=PlayerRosterEligibility(active_team_name="Los Angeles Kings", is_active_roster=True),
+        ),
+        PlayerProjectionCandidate(
+            game_id="2026020406",
+            nhl_player_id="p2",
+            player_name="Anytime Late Two",
+            projected_team_name="Vancouver Canucks",
+            model_probability=0.03,
+            first_goal_probability=0.03,
+            anytime_probability=0.16,
+            historical_production=PlayerHistoricalProduction(season_games_played=58, season_first_goals=1),
+            roster_eligibility=PlayerRosterEligibility(active_team_name="Vancouver Canucks", is_active_roster=True),
+        ),
+    ]
+    odds_rows = [
+        _raw_odds("Anytime Late One", "Los Angeles Kings", "Vancouver Canucks", late_game_time, team="Los Angeles Kings", nhl_player_id="p1", market_odds_american=700),
+        _raw_odds("Anytime Late Two", "Los Angeles Kings", "Vancouver Canucks", late_game_time, team="Vancouver Canucks", nhl_player_id="p2", market_odds_american=1100),
+    ]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    top_plays, best_bet, underdog = service.fetch_game_recommendation_buckets(selected_date, "2026020406", market="anytime")
+
+    assert len(top_plays) == 2
+    assert best_bet is not None
+    assert best_bet.player_id == "p1"
+    assert underdog is not None
+    assert underdog.player_id == "p2"
+
+
+def test_anytime_game_bucket_logs_candidate_rejection_diagnostics(caplog) -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 30), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026020407", game_time=game_time, away_team="Seattle Kraken", home_team="San Jose Sharks")
+    projections = [
+        PlayerProjectionCandidate(
+            game_id="2026020407",
+            nhl_player_id="p1",
+            player_name="Anytime Diagnostic",
+            projected_team_name="Seattle Kraken",
+            model_probability=0.03,
+            first_goal_probability=0.03,
+            anytime_probability=0.20,
+            historical_production=PlayerHistoricalProduction(season_games_played=65, season_first_goals=1),
+            roster_eligibility=PlayerRosterEligibility(active_team_name="Seattle Kraken", is_active_roster=True),
+        ),
+    ]
+    odds_rows = [
+        _raw_odds("Anytime Diagnostic", "Seattle Kraken", "San Jose Sharks", game_time, team="Seattle Kraken", nhl_player_id="p1", market_odds_american=1300),
+    ]
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    with caplog.at_level("INFO"):
+        service.fetch_game_recommendation_buckets(selected_date, "2026020407", market="anytime")
+
+    diagnostic_records = [record for record in caplog.records if record.message == "anytime game bucket diagnostics"]
+    assert diagnostic_records
+    latest = diagnostic_records[-1]
+    assert latest.game_id == "2026020407"
+    assert latest.candidate_count == 1
+    assert latest.best_bet_eligible_count == 0
+    assert latest.best_bet_rejection_counts["odds_above_max"] == 1
+
+
 def test_recommendation_ranking_balances_probability_value_and_confidence() -> None:
     selected_date = date.today()
     game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
