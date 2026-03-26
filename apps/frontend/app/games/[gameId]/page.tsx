@@ -122,7 +122,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
     : [gameResponse.game.away_top_projected_scorer, gameResponse.game.home_top_projected_scorer].filter((leader): leader is TeamProjectionLeader => Boolean(leader));
 
   return (
-    <main className="page stack-gap-lg">
+    <main className="page stack-gap-lg game-detail-page">
       <header className="stack-gap-sm">
         <p className="subtitle">{gameResponse.date}</p>
         <h1>{gameResponse.game.away_team} @ {gameResponse.game.home_team}</h1>
@@ -200,22 +200,24 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
             emptyState="No balanced Top 3 plays are qualified yet for this game."
             ranked
           />
-          <RecommendationSection
-            title="Best Bet"
-            selectedMarket={selectedMarket}
-            description="The single strongest overall play from the blended probability + value model."
-            picks={bestBet ? [bestBet] : []}
-            emptyState="No best bet is qualified for this game yet."
-            featuredClassName="featured-best-bet"
-          />
-          <RecommendationSection
-            title="Underdog Value Play"
-            selectedMarket={selectedMarket}
-            description="A higher-risk, higher-payout option with positive EV and edge."
-            picks={underdogPlay ? [underdogPlay] : []}
-            emptyState="No underdog value play is qualified for this game yet."
-            featuredClassName="featured-underdog"
-          />
+          <div className="featured-recommendations-grid">
+            <RecommendationSection
+              title="Best Bet"
+              selectedMarket={selectedMarket}
+              description="The single strongest overall play from the blended probability + value model."
+              picks={bestBet ? [bestBet] : []}
+              emptyState="No best bet is qualified for this game yet."
+              featuredClassName="featured-best-bet"
+            />
+            <RecommendationSection
+              title="Underdog Value Play"
+              selectedMarket={selectedMarket}
+              description="A higher-risk, higher-payout option with positive EV and edge."
+              picks={underdogPlay ? [underdogPlay] : []}
+              emptyState="No underdog value play is qualified for this game yet."
+              featuredClassName="featured-underdog"
+            />
+          </div>
         </section>
       )}
     </main>
