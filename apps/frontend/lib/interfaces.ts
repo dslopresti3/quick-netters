@@ -110,3 +110,12 @@ export interface RecommendationHistoryResponse {
   lock_cutoff_et?: string;
   snapshots: LockedRecommendationSnapshot[];
 }
+
+export interface HistoricalDateAvailabilityResponse {
+  selected_date?: string;
+  market?: "first_goal" | "anytime";
+  available_dates: string[];
+  min_available_date?: string;
+  max_available_date?: string;
+  has_snapshot: boolean;
+}

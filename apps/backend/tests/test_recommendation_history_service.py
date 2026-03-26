@@ -103,3 +103,27 @@ def test_snapshot_not_created_before_lock(tmp_path: Path) -> None:
 
     assert created is None
     assert service.list_snapshots(selected_date=selected_date, market="first_goal") == []
+
+
+def test_snapshot_is_retrievable_on_future_day_from_persisted_storage(tmp_path: Path) -> None:
+    history_path = tmp_path / "history.json"
+    selected_date = date(2026, 3, 24)
+    lock_time_utc = datetime(2026, 3, 24, 22, 30, tzinfo=timezone.utc)
+
+    writer_service = RecommendationHistoryService(
+        recommendation_service=_MutableRecommendationService(),  # type: ignore[arg-type]
+        schedule_provider=_StubScheduleProvider(),
+        storage_path=history_path,
+    )
+    writer_service.ensure_snapshot(selected_date, "first_goal", now_utc=lock_time_utc)
+
+    reader_service = RecommendationHistoryService(
+        recommendation_service=_MutableRecommendationService(),  # type: ignore[arg-type]
+        schedule_provider=_StubScheduleProvider(),
+        storage_path=history_path,
+    )
+    loaded = reader_service.get_snapshot(selected_date, "first_goal")
+
+    assert loaded is not None
+    assert loaded["date"] == "2026-03-24"
+    assert loaded["top_overall"][0]["player_name"] == "Player Alpha"

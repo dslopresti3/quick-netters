@@ -2,7 +2,7 @@ import Link from "next/link";
 import { DatePickerForm } from "../../components/date-picker-form";
 import { MarketToggle } from "../../components/market-toggle";
 import { RecommendationCard } from "../../components/recommendation-card";
-import { fetchDateAvailability, fetchRecommendationHistory, getCurrentUtcDate, recommendationHistoryExportUrl, resolveDisplayTimezone } from "../../lib/api";
+import { fetchRecommendationHistory, fetchRecommendationHistoryAvailability, getCurrentUtcDate, recommendationHistoryExportUrl, resolveDisplayTimezone } from "../../lib/api";
 import { marketLabel, resolveMarket } from "../../lib/market";
 
 type HistoryPageProps = {
@@ -19,7 +19,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
   const marketTitle = marketLabel(selectedMarket);
   const displayTimezone = resolveDisplayTimezone(searchParams?.timezone);
 
-  const availability = await fetchDateAvailability(selectedDate, selectedMarket);
+  const historyAvailability = await fetchRecommendationHistoryAvailability(selectedDate, selectedMarket);
   const historyResponse = await fetchRecommendationHistory(selectedDate, selectedMarket);
   const snapshot = historyResponse.snapshots[0];
 
@@ -29,19 +29,41 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
         <h1>Historical Picks</h1>
         <p className="subtitle">Stored snapshots only · Date: {selectedDate} · Market: {marketTitle}</p>
         <MarketToggle selectedDate={selectedDate} displayTimezone={displayTimezone} selectedMarket={selectedMarket} path="/history" />
+        <Link href={`/slate?date=${encodeURIComponent(selectedDate)}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">
+          ← Back to Daily Slate
+        </Link>
       </header>
 
       <section className="card stack-gap">
         <h2>Change date</h2>
         <DatePickerForm
           defaultDate={selectedDate}
-          minDate={availability.min_allowed_date}
-          maxDate={availability.max_allowed_date}
+          minDate={historyAvailability.min_available_date ?? selectedDate}
+          maxDate={historyAvailability.max_available_date ?? selectedDate}
           submitLabel="Load historical picks"
           actionPath="/history"
           market={selectedMarket}
         />
+        <p className="helper-text">
+          Saved snapshot dates: {historyAvailability.available_dates.length > 0 ? historyAvailability.available_dates.join(", ") : "none yet"}.
+        </p>
         <p className="helper-text">Lock cutoff (ET): {historyResponse.lock_cutoff_et ? new Date(historyResponse.lock_cutoff_et).toLocaleString("en-US", { timeZone: "America/New_York" }) : "Not available"}</p>
+        {historyAvailability.available_dates.length > 0 && (
+          <div className="stack-gap-sm">
+            <h3>Browse saved dates</h3>
+            <div className="stack-gap-sm">
+              {historyAvailability.available_dates.map((availableDate) => (
+                <Link
+                  key={availableDate}
+                  href={`/history?date=${encodeURIComponent(availableDate)}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`}
+                  className="secondary-link"
+                >
+                  {availableDate === selectedDate ? `✓ ${availableDate}` : availableDate}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="card stack-gap">
@@ -61,7 +83,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
 
       {!snapshot ? (
         <section className="card">
-          <p className="empty-state">No locked historical picks are available for this date and market.</p>
+          <p className="empty-state">No locked historical picks are available for this date and market. Choose any saved date above.</p>
         </section>
       ) : (
         <>

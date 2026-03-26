@@ -3,6 +3,7 @@ import type {
   DateAvailabilityResponse,
   GameRecommendationsResponse,
   GamesResponse,
+  HistoricalDateAvailabilityResponse,
   RecommendationHistoryResponse,
 } from "./interfaces";
 import type { RecommendationMarket } from "./market";
@@ -89,6 +90,21 @@ export async function fetchRecommendationHistory(date?: string, market?: Recomme
   }
   const query = params.toString();
   return fetchJson<RecommendationHistoryResponse>(`/recommendations/history${query ? `?${query}` : ""}`);
+}
+
+export async function fetchRecommendationHistoryAvailability(
+  date?: string,
+  market?: RecommendationMarket,
+): Promise<HistoricalDateAvailabilityResponse> {
+  const params = new URLSearchParams();
+  if (date) {
+    params.set("date", date);
+  }
+  if (market) {
+    params.set("market", market);
+  }
+  const query = params.toString();
+  return fetchJson<HistoricalDateAvailabilityResponse>(`/recommendations/history/availability${query ? `?${query}` : ""}`);
 }
 
 export function recommendationHistoryExportUrl(format: "json" | "csv", date?: string, market?: RecommendationMarket): string {

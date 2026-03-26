@@ -147,3 +147,12 @@ class RecommendationHistoryResponse(APIModel):
     earliest_game_time_et: datetime | None = None
     lock_cutoff_et: datetime | None = None
     snapshots: list[LockedRecommendationSnapshot] = Field(default_factory=list)
+
+
+class HistoricalDateAvailabilityResponse(APIModel):
+    selected_date: DateType | None = None
+    market: Literal["first_goal", "anytime"] | None = None
+    available_dates: list[DateType] = Field(default_factory=list)
+    min_available_date: DateType | None = None
+    max_available_date: DateType | None = None
+    has_snapshot: bool = False

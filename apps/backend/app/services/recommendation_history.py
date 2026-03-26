@@ -111,6 +111,19 @@ class RecommendationHistoryService:
         ]
         return sorted(filtered, key=lambda row: (row.get("date", ""), row.get("market", "")), reverse=True)
 
+    def list_snapshot_dates(self, market: Market | None = None) -> list[date]:
+        snapshots = self.list_snapshots(market=market)
+        snapshot_dates: list[date] = []
+        for snapshot in snapshots:
+            raw_date = snapshot.get("date")
+            if not isinstance(raw_date, str):
+                continue
+            try:
+                snapshot_dates.append(date.fromisoformat(raw_date))
+            except ValueError:
+                continue
+        return sorted(set(snapshot_dates))
+
     def export_csv(self, selected_date: date | None = None, market: Market | None = None) -> str:
         snapshots = self.list_snapshots(selected_date=selected_date, market=market)
         header = [
