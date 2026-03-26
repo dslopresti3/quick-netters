@@ -1,4 +1,6 @@
-from datetime import date, datetime
+from __future__ import annotations
+
+from datetime import date as DateType, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,9 +17,9 @@ DateAvailabilityStatus = Literal["invalid_date", "no_schedule", "missing_project
 
 
 class DateAvailabilityResponse(APIModel):
-    selected_date: date
-    min_allowed_date: date
-    max_allowed_date: date
+    selected_date: DateType
+    min_allowed_date: DateType
+    max_allowed_date: DateType
     valid_by_product_rule: bool
     schedule_available: bool
     projections_available: bool
@@ -95,7 +97,7 @@ class Recommendation(APIModel):
 
 
 class GamesResponse(APIModel):
-    date: date
+    date: DateType
     games: list[GameSummary]
     projections_available: bool = True
     odds_available: bool = True
@@ -103,7 +105,7 @@ class GamesResponse(APIModel):
 
 
 class DailyRecommendationsResponse(APIModel):
-    date: date
+    date: DateType
     recommendations: list[Recommendation]
     projections_available: bool = True
     odds_available: bool = True
@@ -111,7 +113,7 @@ class DailyRecommendationsResponse(APIModel):
 
 
 class GameRecommendationsResponse(APIModel):
-    date: date
+    date: DateType
     game: GameSummary
     recommendations: list[Recommendation]
     top_plays: list[Recommendation] = Field(default_factory=list)
@@ -120,3 +122,28 @@ class GameRecommendationsResponse(APIModel):
     projections_available: bool = True
     odds_available: bool = True
     notes: list[str] = Field(default_factory=list)
+
+class HistoricalGameSnapshot(APIModel):
+    game: GameSummary
+    top_plays: list[Recommendation] = Field(default_factory=list)
+    best_bet: Recommendation | None = None
+    underdog_value_play: Recommendation | None = None
+
+
+class LockedRecommendationSnapshot(APIModel):
+    date: DateType
+    market: Literal["first_goal", "anytime"]
+    snapshot_created_at: datetime
+    earliest_game_time_et: datetime
+    lock_cutoff_et: datetime
+    top_overall: list[Recommendation] = Field(default_factory=list)
+    games: list[HistoricalGameSnapshot] = Field(default_factory=list)
+
+
+class RecommendationHistoryResponse(APIModel):
+    date: DateType | None = None
+    market: Literal["first_goal", "anytime"] | None = None
+    is_locked: bool | None = None
+    earliest_game_time_et: datetime | None = None
+    lock_cutoff_et: datetime | None = None
+    snapshots: list[LockedRecommendationSnapshot] = Field(default_factory=list)

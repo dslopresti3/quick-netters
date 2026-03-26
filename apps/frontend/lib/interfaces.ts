@@ -83,3 +83,30 @@ export interface GameRecommendationsResponse {
   odds_available: boolean;
   notes: string[];
 }
+
+
+export interface HistoricalGameSnapshot {
+  game: GameSummary;
+  top_plays: Recommendation[];
+  best_bet?: Recommendation;
+  underdog_value_play?: Recommendation;
+}
+
+export interface LockedRecommendationSnapshot {
+  date: string;
+  market: "first_goal" | "anytime";
+  snapshot_created_at: string;
+  earliest_game_time_et: string;
+  lock_cutoff_et: string;
+  top_overall: Recommendation[];
+  games: HistoricalGameSnapshot[];
+}
+
+export interface RecommendationHistoryResponse {
+  date?: string;
+  market?: "first_goal" | "anytime";
+  is_locked?: boolean;
+  earliest_game_time_et?: string;
+  lock_cutoff_et?: string;
+  snapshots: LockedRecommendationSnapshot[];
+}

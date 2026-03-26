@@ -87,6 +87,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
         <h1>Daily Slate</h1>
         <p className="subtitle">{selectedDate} · {marketTitle} market</p>
         <MarketToggle selectedDate={selectedDate} displayTimezone={displayTimezone} selectedMarket={selectedMarket} path="/slate" />
+        <Link href={`/history?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">View historical picks</Link>
       </header>
 
       <section className="card stack-gap">

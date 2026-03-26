@@ -3,6 +3,7 @@ import type {
   DateAvailabilityResponse,
   GameRecommendationsResponse,
   GamesResponse,
+  RecommendationHistoryResponse,
 } from "./interfaces";
 import type { RecommendationMarket } from "./market";
 
@@ -75,4 +76,29 @@ export async function fetchGameRecommendations(
     }
     throw error;
   }
+}
+
+
+export async function fetchRecommendationHistory(date?: string, market?: RecommendationMarket): Promise<RecommendationHistoryResponse> {
+  const params = new URLSearchParams();
+  if (date) {
+    params.set("date", date);
+  }
+  if (market) {
+    params.set("market", market);
+  }
+  const query = params.toString();
+  return fetchJson<RecommendationHistoryResponse>(`/recommendations/history${query ? `?${query}` : ""}`);
+}
+
+export function recommendationHistoryExportUrl(format: "json" | "csv", date?: string, market?: RecommendationMarket): string {
+  const params = new URLSearchParams();
+  params.set("format", format);
+  if (date) {
+    params.set("date", date);
+  }
+  if (market) {
+    params.set("market", market);
+  }
+  return `${API_BASE_URL}/recommendations/history/export?${params.toString()}`;
 }

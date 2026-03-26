@@ -1,9 +1,10 @@
 from datetime import date
+import json
 import logging
 from time import perf_counter
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from app.api.schemas import (
     DailyRecommendationsResponse,
@@ -11,6 +12,8 @@ from app.api.schemas import (
     GameRecommendationsResponse,
     GameSummary,
     GamesResponse,
+    LockedRecommendationSnapshot,
+    RecommendationHistoryResponse,
 )
 from app.services.provider_wiring import ProviderRegistry
 from app.services.markets import Market, resolve_market
@@ -133,6 +136,15 @@ def _schedule_fetch_failure_note(providers: ProviderRegistry) -> str | None:
     return None
 
 
+
+
+def _trigger_snapshot_capture(selected_date: date, market: Market, providers: ProviderRegistry) -> None:
+    history_service = getattr(providers, "recommendation_history_service", None)
+    if history_service is None:
+        return
+    history_service.ensure_snapshot(selected_date, market)
+
+
 def _resolve_display_timezone(display_timezone: str | None) -> str:
     if isinstance(display_timezone, str) and display_timezone.strip():
         candidate = display_timezone.strip()
@@ -179,6 +191,7 @@ def get_games(
     request_started = perf_counter()
     logger.info("games route entry", extra={"selected_date": date.isoformat()})
     ensure_date_not_more_than_one_day_ahead(date)
+    _trigger_snapshot_capture(date, selected_market, providers)
     logger.info("games schedule fetch start", extra={"selected_date": date.isoformat()})
     schedule_started = perf_counter()
     games = providers.schedule_provider.fetch(date)
@@ -261,6 +274,7 @@ def get_daily_recommendations(
 ) -> DailyRecommendationsResponse:
     selected_market = resolve_market(market)
     ensure_date_not_more_than_one_day_ahead(date)
+    _trigger_snapshot_capture(date, selected_market, providers)
     recommendations = providers.recommendation_service.fetch_daily(date, market=selected_market)
     projections_available, odds_available, notes = _availability_notes(date, providers, market=selected_market)
     return DailyRecommendationsResponse(
@@ -282,6 +296,7 @@ def get_game_recommendations(
 ) -> GameRecommendationsResponse:
     selected_market = resolve_market(market)
     ensure_date_not_more_than_one_day_ahead(date)
+    _trigger_snapshot_capture(date, selected_market, providers)
     games = providers.recommendation_service.attach_top_projected_scorers(date, providers.schedule_provider.fetch(date))
     games_by_id = {game.game_id: game for game in games}
 
@@ -304,3 +319,67 @@ def get_game_recommendations(
         odds_available=odds_available,
         notes=notes,
     )
+
+
+@router.get("/recommendations/history", response_model=RecommendationHistoryResponse)
+def get_recommendation_history(
+    date: date | None = Query(default=None, description="Optional UTC date filter"),
+    market: str | None = Query(default=None, description="Recommendation market: first_goal or anytime"),
+    providers: ProviderRegistry = Depends(get_provider_registry),
+) -> RecommendationHistoryResponse:
+    history_service = getattr(providers, "recommendation_history_service", None)
+    if history_service is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Recommendation history service unavailable")
+
+    selected_market = resolve_market(market) if market is not None else None
+    if date is not None and selected_market is not None:
+        history_service.ensure_snapshot(date, selected_market)
+
+    snapshots = [LockedRecommendationSnapshot.model_validate(item) for item in history_service.list_snapshots(date, selected_market)]
+
+    if date is None or selected_market is None:
+        return RecommendationHistoryResponse(snapshots=snapshots)
+
+    lock_context = history_service.compute_lock_context(date)
+    if lock_context is None:
+        return RecommendationHistoryResponse(
+            date=date,
+            market=selected_market,
+            is_locked=False,
+            snapshots=snapshots,
+        )
+
+    earliest_game_time_et, lock_cutoff_et = lock_context
+    return RecommendationHistoryResponse(
+        date=date,
+        market=selected_market,
+        is_locked=history_service.is_locked(date),
+        earliest_game_time_et=earliest_game_time_et,
+        lock_cutoff_et=lock_cutoff_et,
+        snapshots=snapshots,
+    )
+
+
+@router.get("/recommendations/history/export")
+def export_recommendation_history(
+    format: str = Query(default="json", description="Export format: json or csv"),
+    date: date | None = Query(default=None, description="Optional UTC date filter"),
+    market: str | None = Query(default=None, description="Recommendation market: first_goal or anytime"),
+    providers: ProviderRegistry = Depends(get_provider_registry),
+) -> Response:
+    history_service = getattr(providers, "recommendation_history_service", None)
+    if history_service is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Recommendation history service unavailable")
+
+    selected_market = resolve_market(market) if market is not None else None
+    normalized_format = format.strip().lower()
+
+    if normalized_format == "csv":
+        payload = history_service.export_csv(selected_date=date, market=selected_market)
+        return Response(content=payload, media_type="text/csv")
+
+    if normalized_format == "json":
+        snapshots = history_service.list_snapshots(selected_date=date, market=selected_market)
+        return Response(content=json.dumps({"snapshots": snapshots}), media_type="application/json")
+
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported format. Use json or csv")
