@@ -110,7 +110,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
               <li key={message}>{message}</li>
             ))}
           </ul>
-          <Link href={`/slate?date=${availability.min_allowed_date}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">Back to slate</Link>
+          <Link href={`/slate?date=${availability.min_allowed_date}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">Back to Daily Slate</Link>
         </section>
       </main>
     );
@@ -128,7 +128,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
             ))}
           </ul>
         </section>
-        <Link href={`/slate?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">Back to slate</Link>
+        <Link href={`/slate?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">Back to Daily Slate</Link>
       </main>
     );
   }
@@ -142,7 +142,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
         <section className="card">
           <p className="empty-state">No game detail exists for this matchup and date yet.</p>
         </section>
-        <Link href={`/slate?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">Back to slate</Link>
+        <Link href={`/slate?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">Back to Daily Slate</Link>
       </main>
     );
   }
@@ -160,19 +160,21 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
     gameResponse.game.home_top_projected_scorer,
     gameResponse.game.home_team,
   );
-  const featuredProjectionRows = [awayTeamLeader, homeTeamLeader].filter((leader): leader is TeamProjectionLeader => Boolean(leader));
+  const featuredProjectionRows = [
+    { team: gameResponse.game.away_team, leader: awayTeamLeader },
+    { team: gameResponse.game.home_team, leader: homeTeamLeader },
+  ];
   const featuredScorerLabel = selectedMarket === "anytime" ? "Top projected anytime scorer" : "Top projected first-goal scorer";
   const projectionMetricLabel = selectedMarket === "anytime" ? "Anytime scoring probability" : "First-goal probability";
 
   return (
     <main className="page stack-gap-lg game-detail-page">
       <header className="stack-gap-sm">
-        <p className="subtitle">{gameResponse.date}</p>
+        <p className="subtitle">Date: {gameResponse.date} · Market: {selectedMarketLabel}</p>
         <h1>{gameResponse.game.away_team} @ {gameResponse.game.home_team}</h1>
         <p className="helper-text">Start {gameResponse.game.display_game_time ?? new Date(gameResponse.game.game_time).toLocaleString("en-US", { timeZone: displayTimezone })} {gameResponse.game.display_timezone ?? displayTimezone}</p>
-        <p className="helper-text">Selected market: {selectedMarketLabel}</p>
         <MarketToggle selectedDate={selectedDate} displayTimezone={displayTimezone} selectedMarket={selectedMarket} path={`/games/${params.gameId}`} />
-        <Link href={`/slate?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">← Back to slate</Link>
+        <Link href={`/slate?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">← Back to Daily Slate</Link>
       </header>
 
       {gameResponse.notes.length > 0 && (
@@ -202,26 +204,36 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
           <h2>{featuredScorerLabel}s by team</h2>
           <p className="helper-text">Quick matchup view of each team&apos;s top projected scorer for the selected market.</p>
         </div>
-        {featuredProjectionRows.length === 0 ? (
-          <p className="empty-state">Projection data is not available yet for this game.</p>
-        ) : (
-          <ul className="featured-scorer-list">
-            {featuredProjectionRows.map((scorer) => (
-              <li key={`${scorer.team}-${scorer.player_id}`} className="featured-scorer-row">
+        <ul className="featured-scorer-list">
+          {featuredProjectionRows.map(({ team, leader }) => (
+            <li key={team} className="featured-scorer-row">
+              {leader ? (
                 <div>
                   <p className="featured-scorer-rank">{featuredScorerLabel}</p>
-                  <p className="featured-scorer-name">{scorer.player_name}</p>
-                  <p className="helper-text">{scorer.team_name ?? scorer.player_team ?? scorer.team}</p>
+                  <p className="featured-scorer-name">{leader.player_name}</p>
+                  <p className="helper-text">{leader.team_name ?? leader.player_team ?? team}</p>
                 </div>
-                <div className="featured-scorer-metric">
-                  <span className="metric-label">{projectionMetricLabel}</span>
-                  <strong>{formatProbabilityPercent(scorer.model_probability)}</strong>
-                  <span className="helper-text">Model output: {formatProjectedGoalTotal(scorer.model_probability)}</span>
+              ) : (
+                <div>
+                  <p className="featured-scorer-rank">{featuredScorerLabel}</p>
+                  <p className="featured-scorer-name">{team}</p>
+                  <p className="helper-text">Top projected scorer unavailable.</p>
                 </div>
-              </li>
-            ))}
-          </ul>
-        )}
+              )}
+              <div className="featured-scorer-metric">
+                <span className="metric-label">{projectionMetricLabel}</span>
+                {leader ? (
+                  <>
+                    <strong>{formatProbabilityPercent(leader.model_probability)}</strong>
+                    <span className="helper-text">Model output: {formatProjectedGoalTotal(leader.model_probability)}</span>
+                  </>
+                ) : (
+                  <strong>-</strong>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
       </section>
 
       {!availability.projections_available ? (
