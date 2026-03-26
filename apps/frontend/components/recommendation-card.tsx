@@ -1,8 +1,11 @@
 import type { Recommendation } from "../lib/interfaces";
+import type { RecommendationMarket } from "../lib/market";
+import { marketLabel, marketScoreVerb, marketSeasonMetricLabel } from "../lib/market";
 
 type RecommendationCardProps = {
   recommendation: Recommendation;
   rank?: number;
+  market?: RecommendationMarket;
 };
 
 type MetricLabelProps = {
@@ -29,7 +32,10 @@ function MetricLabel({ label, tooltip }: MetricLabelProps) {
   );
 }
 
-export function RecommendationCard({ recommendation, rank }: RecommendationCardProps) {
+export function RecommendationCard({ recommendation, rank, market = "first_goal" }: RecommendationCardProps) {
+  const marketName = marketLabel(market);
+  const seasonMetricLabel = marketSeasonMetricLabel(market);
+
   return (
     <article className="recommendation-card stack-gap-sm">
       <header className="recommendation-card-header">
@@ -38,9 +44,12 @@ export function RecommendationCard({ recommendation, rank }: RecommendationCardP
           <h3 className="recommendation-player-name">{recommendation.player_name}</h3>
           <p className="helper-text">{recommendation.player_team ?? recommendation.team_name ?? `${recommendation.away_team} / ${recommendation.home_team}`}</p>
         </div>
-        {recommendation.confidence_tag && (
-          <span className={`confidence-badge confidence-${recommendation.confidence_tag}`}>{recommendation.confidence_tag}</span>
-        )}
+        <div className="recommendation-card-meta stack-gap-sm">
+          <span className="market-chip">{marketName}</span>
+          {recommendation.confidence_tag && (
+            <span className={`confidence-badge confidence-${recommendation.confidence_tag}`}>{recommendation.confidence_tag}</span>
+          )}
+        </div>
       </header>
 
       <section className="metrics-section">
@@ -49,7 +58,7 @@ export function RecommendationCard({ recommendation, rank }: RecommendationCardP
           <div className="primary-metric">
             <MetricLabel
               label="Model probability"
-              tooltip="Your model's estimated chance this player scores the first goal. Higher values indicate a stronger model signal."
+              tooltip={`Your model's estimated chance this player ${marketScoreVerb(market)}. Higher values indicate a stronger model signal.`}
             />
             <strong className="metric-value-prominent">{formatPercent(recommendation.model_probability)}</strong>
           </div>
@@ -101,7 +110,7 @@ export function RecommendationCard({ recommendation, rank }: RecommendationCardP
             <strong>{recommendation.goals_this_year ?? "-"}</strong>
           </div>
           <div className="supporting-metric">
-            <span className="metric-label">First goals this year</span>
+            <span className="metric-label">{seasonMetricLabel}</span>
             <strong>{recommendation.first_goals_this_year ?? "-"}</strong>
           </div>
         </div>

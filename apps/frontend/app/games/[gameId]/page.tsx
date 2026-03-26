@@ -27,6 +27,7 @@ function RecommendationSection({
   emptyState,
   featuredClassName,
   ranked = false,
+  selectedMarket,
 }: {
   title: string;
   description: string;
@@ -34,6 +35,7 @@ function RecommendationSection({
   emptyState: string;
   featuredClassName?: string;
   ranked?: boolean;
+  selectedMarket: "first_goal" | "anytime";
 }) {
   return (
     <section className={`card stack-gap recommendation-panel${featuredClassName ? ` ${featuredClassName}` : ""}`}>
@@ -42,11 +44,11 @@ function RecommendationSection({
       {picks.length === 0 ? (
         <p className="empty-state">{emptyState}</p>
       ) : picks.length === 1 ? (
-        <RecommendationCard recommendation={picks[0]} rank={ranked ? 1 : undefined} />
+        <RecommendationCard recommendation={picks[0]} rank={ranked ? 1 : undefined} market={selectedMarket} />
       ) : (
         <div className="recommendation-grid">
           {picks.map((pick, index) => (
-            <RecommendationCard key={pick.player_id} recommendation={pick} rank={ranked ? index + 1 : undefined} />
+            <RecommendationCard key={pick.player_id} recommendation={pick} rank={ranked ? index + 1 : undefined} market={selectedMarket} />
           ))}
         </div>
       )}
@@ -125,7 +127,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
         <p className="subtitle">{gameResponse.date}</p>
         <h1>{gameResponse.game.away_team} @ {gameResponse.game.home_team}</h1>
         <p className="helper-text">Start {gameResponse.game.display_game_time ?? new Date(gameResponse.game.game_time).toLocaleString("en-US", { timeZone: displayTimezone })} {gameResponse.game.display_timezone ?? displayTimezone}</p>
-        <p className="helper-text">Market: {selectedMarketLabel}</p>
+        <p className="helper-text">Selected market: {selectedMarketLabel}</p>
         <MarketToggle selectedDate={selectedDate} displayTimezone={displayTimezone} selectedMarket={selectedMarket} path={`/games/${params.gameId}`} />
         <Link href={`/slate?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">← Back to slate</Link>
       </header>
@@ -191,21 +193,24 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
       ) : (
         <section className="recommendation-hub stack-gap">
           <RecommendationSection
-            title="Top 3 plays"
+            title="Top 3 Plays"
+            selectedMarket={selectedMarket}
             description="Best balanced plays using a blended probability + betting value ranking."
             picks={topPlays}
             emptyState="No balanced Top 3 plays are qualified yet for this game."
             ranked
           />
           <RecommendationSection
-            title="Best bet"
+            title="Best Bet"
+            selectedMarket={selectedMarket}
             description="The single strongest overall play from the blended probability + value model."
             picks={bestBet ? [bestBet] : []}
             emptyState="No best bet is qualified for this game yet."
             featuredClassName="featured-best-bet"
           />
           <RecommendationSection
-            title="Underdog value play"
+            title="Underdog Value Play"
+            selectedMarket={selectedMarket}
             description="A higher-risk, higher-payout option with positive EV and edge."
             picks={underdogPlay ? [underdogPlay] : []}
             emptyState="No underdog value play is qualified for this game yet."

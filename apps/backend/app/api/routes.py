@@ -28,6 +28,17 @@ logger = logging.getLogger(__name__)
 DEFAULT_DISPLAY_TIMEZONE = "America/New_York"
 
 
+def _market_display_label(market: Market) -> str:
+    return "Anytime" if market == "anytime" else "First Goal"
+
+
+def _missing_projection_note(market: Market) -> str:
+    return f"{_market_display_label(market)} recommendations are not available for this date yet. Value picks will appear after model generation runs."
+
+
+def _missing_odds_note(market: Market) -> str:
+    return f"{_market_display_label(market)} market odds are not available for this date yet. Value picks will appear once odds are posted."
+
 def get_provider_registry(request: Request) -> ProviderRegistry:
     return request.app.state.provider_registry
 
@@ -91,13 +102,13 @@ def _build_date_availability(selected_date: date, providers: ProviderRegistry, m
     if not projections_available:
         status_value = "missing_projections"
         messages = [
-            "Schedule is available, but projections are not ready yet.",
+            f"Schedule is available, but {_market_display_label(market)} projections are not ready yet.",
             "Value picks will appear after model generation runs.",
         ]
     elif not odds_available:
         status_value = "missing_odds"
         messages = [
-            "Schedule and projections are available, but market odds are not posted yet.",
+            f"Schedule and projections are available, but {_market_display_label(market)} market odds are not posted yet.",
             "Value picks will appear once odds are available.",
         ]
     else:
@@ -122,9 +133,9 @@ def _availability_notes(selected_date: date, providers: ProviderRegistry, market
 
     notes: list[str] = []
     if metadata.status == "missing_projections":
-        notes.append("Projections are not available for this date yet. Value picks will appear after model generation runs.")
+        notes.append(_missing_projection_note(market))
     if metadata.status == "missing_odds":
-        notes.append("Market odds are not available for this date yet. Value picks will appear once odds are posted.")
+        notes.append(_missing_odds_note(market))
 
     return metadata.projections_available, metadata.odds_available, notes
 
@@ -235,9 +246,9 @@ def get_games(
         projections_available = providers.recommendation_service.projections_available(date, market=selected_market)
         odds_available = providers.recommendation_service.odds_available(date, market=selected_market)
         if not projections_available:
-            notes.append("Projections are not available for this date yet. Value picks will appear after model generation runs.")
+            notes.append(_missing_projection_note(selected_market))
         if not odds_available:
-            notes.append("Market odds are not available for this date yet. Value picks will appear once odds are posted.")
+            notes.append(_missing_odds_note(selected_market))
 
     if schedule_fetch_failure_note is not None:
         notes.append(schedule_fetch_failure_note)

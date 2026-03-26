@@ -27,7 +27,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
     <main className="page stack-gap-lg">
       <header>
         <h1>Historical Picks</h1>
-        <p className="subtitle">Stored snapshots only · {selectedDate} · {marketTitle}</p>
+        <p className="subtitle">Stored snapshots only · Date: {selectedDate} · Market: {marketTitle}</p>
         <MarketToggle selectedDate={selectedDate} displayTimezone={displayTimezone} selectedMarket={selectedMarket} path="/history" />
       </header>
 
@@ -45,7 +45,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
       </section>
 
       <section className="card stack-gap">
-        <h2>Status</h2>
+        <h2>Status · {marketTitle} · {selectedDate}</h2>
         {snapshot ? (
           <p className="helper-text"><strong>Locked snapshot.</strong> Created at {new Date(snapshot.snapshot_created_at).toLocaleString("en-US", { timeZone: "America/New_York" })} ET.</p>
         ) : historyResponse.is_locked ? (
@@ -72,7 +72,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
             ) : (
               <div className="recommendation-grid">
                 {snapshot.top_overall.map((pick, index) => (
-                  <RecommendationCard key={`${pick.game_id}-${pick.player_id}`} recommendation={pick} rank={index + 1} />
+                  <RecommendationCard key={`${pick.game_id}-${pick.player_id}`} recommendation={pick} rank={index + 1} market={selectedMarket} />
                 ))}
               </div>
             )}
@@ -85,18 +85,18 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
                 <h3>{gameSnapshot.game.away_team} @ {gameSnapshot.game.home_team}</h3>
                 <p className="helper-text">Start {gameSnapshot.game.display_game_time ?? new Date(gameSnapshot.game.game_time).toLocaleString("en-US", { timeZone: displayTimezone })} {gameSnapshot.game.display_timezone ?? displayTimezone}</p>
                 <div className="stack-gap">
-                  <h4>Top 3 plays</h4>
+                  <h4>Top 3 Plays</h4>
                   {gameSnapshot.top_plays.length === 0 ? <p className="empty-state">No qualified top plays.</p> : (
                     <div className="recommendation-grid">
                       {gameSnapshot.top_plays.map((pick, index) => (
-                        <RecommendationCard key={`top-${gameSnapshot.game.game_id}-${pick.player_id}`} recommendation={pick} rank={index + 1} />
+                        <RecommendationCard key={`top-${gameSnapshot.game.game_id}-${pick.player_id}`} recommendation={pick} rank={index + 1} market={selectedMarket} />
                       ))}
                     </div>
                   )}
-                  <h4>Best bet</h4>
-                  {gameSnapshot.best_bet ? <RecommendationCard recommendation={gameSnapshot.best_bet} /> : <p className="empty-state">No best bet stored.</p>}
-                  <h4>Underdog value play</h4>
-                  {gameSnapshot.underdog_value_play ? <RecommendationCard recommendation={gameSnapshot.underdog_value_play} /> : <p className="empty-state">No underdog play stored.</p>}
+                  <h4>Best Bet</h4>
+                  {gameSnapshot.best_bet ? <RecommendationCard recommendation={gameSnapshot.best_bet} market={selectedMarket} /> : <p className="empty-state">No best bet stored.</p>}
+                  <h4>Underdog Value Play</h4>
+                  {gameSnapshot.underdog_value_play ? <RecommendationCard recommendation={gameSnapshot.underdog_value_play} market={selectedMarket} /> : <p className="empty-state">No underdog play stored.</p>}
                 </div>
               </article>
             ))}
