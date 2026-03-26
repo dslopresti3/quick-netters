@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 from app.services.interfaces import OddsProvider, ProjectionProvider, ScheduleProvider
 from app.services.dev_projection_provider import (
@@ -14,6 +15,7 @@ from app.services.mock_services import MockGamesService, MockOddsService, MockPr
 from app.services.odds_provider import LiveOddsProvider
 from app.services.projection_store import build_real_projection_data_source_from_env
 from app.services.recommendation_service import ValueRecommendationService
+from app.services.recommendation_history import RecommendationHistoryService
 from app.services.real_services import NhlScheduleProvider
 
 
@@ -28,6 +30,7 @@ class ProviderRegistry:
     projection_provider: ProjectionProvider
     odds_provider: OddsProvider
     recommendation_service: ValueRecommendationService
+    recommendation_history_service: RecommendationHistoryService | None = None
 
 
 def _parse_provider_mode(raw_mode: str | None) -> ProviderMode:
@@ -65,9 +68,16 @@ def build_provider_registry_from_env() -> ProviderRegistry:
         projection_provider=projection_provider,
         odds_provider=odds_provider,
     )
+    history_path = Path(os.getenv("RECOMMENDATION_HISTORY_PATH", "apps/backend/app/data/recommendation_history/snapshots.json"))
+    recommendation_history_service = RecommendationHistoryService(
+        recommendation_service=recommendation_service,
+        schedule_provider=schedule_provider,
+        storage_path=history_path,
+    )
     return ProviderRegistry(
         schedule_provider=schedule_provider,
         projection_provider=projection_provider,
         odds_provider=odds_provider,
         recommendation_service=recommendation_service,
+        recommendation_history_service=recommendation_history_service,
     )

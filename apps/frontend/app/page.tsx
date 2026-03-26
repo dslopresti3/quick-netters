@@ -1,5 +1,6 @@
 import { DatePickerForm } from "../components/date-picker-form";
 import { fetchDateAvailability, getCurrentUtcDate } from "../lib/api";
+import Link from "next/link";
 
 export default async function HomePage() {
   const availability = await fetchDateAvailability(getCurrentUtcDate());
@@ -19,6 +20,7 @@ export default async function HomePage() {
           submitLabel="View slate"
           actionPath="/slate"
         />
+        <Link href="/history" className="secondary-link">View historical picks</Link>
       </section>
 
       <section className="card stack-gap metrics-explainer">
