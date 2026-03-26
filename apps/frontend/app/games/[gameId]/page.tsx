@@ -20,6 +20,42 @@ function formatProjectedGoalTotal(modelProbability: number): string {
   return modelProbability.toFixed(2);
 }
 
+function formatProbabilityPercent(probability: number): string {
+  return `${(probability * 100).toFixed(1)}%`;
+}
+
+function normalizeTeamName(value?: string): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function resolveTeamLeader(
+  recommendations: Recommendation[],
+  fallbackLeader: TeamProjectionLeader | undefined,
+  teamName: string,
+): TeamProjectionLeader | undefined {
+  const normalizedTeamName = normalizeTeamName(teamName);
+
+  const topFromRecommendations = recommendations
+    .filter((recommendation) => {
+      const recommendationTeam = normalizeTeamName(recommendation.player_team ?? recommendation.team_name);
+      return recommendationTeam === normalizedTeamName;
+    })
+    .sort((a, b) => b.model_probability - a.model_probability)[0];
+
+  if (topFromRecommendations) {
+    return {
+      team: teamName,
+      player_id: topFromRecommendations.player_id,
+      player_name: topFromRecommendations.player_name,
+      player_team: topFromRecommendations.player_team,
+      team_name: topFromRecommendations.team_name,
+      model_probability: topFromRecommendations.model_probability,
+    };
+  }
+
+  return fallbackLeader;
+}
+
 function RecommendationSection({
   title,
   description,
@@ -114,12 +150,19 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
   const topPlays = gameResponse.top_plays ?? gameResponse.recommendations.slice(0, 3);
   const bestBet = gameResponse.best_bet;
   const underdogPlay = gameResponse.underdog_value_play;
-  const topProjectedScorers = [...gameResponse.recommendations]
-    .sort((a, b) => b.model_probability - a.model_probability)
-    .slice(0, 3);
-  const featuredProjectionRows: Array<Recommendation | TeamProjectionLeader> = topProjectedScorers.length > 0
-    ? topProjectedScorers
-    : [gameResponse.game.away_top_projected_scorer, gameResponse.game.home_top_projected_scorer].filter((leader): leader is TeamProjectionLeader => Boolean(leader));
+  const awayTeamLeader = resolveTeamLeader(
+    gameResponse.recommendations,
+    gameResponse.game.away_top_projected_scorer,
+    gameResponse.game.away_team,
+  );
+  const homeTeamLeader = resolveTeamLeader(
+    gameResponse.recommendations,
+    gameResponse.game.home_top_projected_scorer,
+    gameResponse.game.home_team,
+  );
+  const featuredProjectionRows = [awayTeamLeader, homeTeamLeader].filter((leader): leader is TeamProjectionLeader => Boolean(leader));
+  const featuredScorerLabel = selectedMarket === "anytime" ? "Top projected anytime scorer" : "Top projected first-goal scorer";
+  const projectionMetricLabel = selectedMarket === "anytime" ? "Anytime scoring probability" : "First-goal probability";
 
   return (
     <main className="page stack-gap-lg game-detail-page">
@@ -156,23 +199,24 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
 
       <section className="card stack-gap featured-scorer-summary">
         <div className="featured-summary-header">
-          <h2>Featured projected scorers</h2>
-          <p className="helper-text">Quick read on the strongest model signals for this matchup.</p>
+          <h2>{featuredScorerLabel}s by team</h2>
+          <p className="helper-text">Quick matchup view of each team&apos;s top projected scorer for the selected market.</p>
         </div>
         {featuredProjectionRows.length === 0 ? (
           <p className="empty-state">Projection data is not available yet for this game.</p>
         ) : (
           <ul className="featured-scorer-list">
-            {featuredProjectionRows.map((scorer, index) => (
-              <li key={scorer.player_id} className="featured-scorer-row">
+            {featuredProjectionRows.map((scorer) => (
+              <li key={`${scorer.team}-${scorer.player_id}`} className="featured-scorer-row">
                 <div>
-                  <p className="featured-scorer-rank">#{index + 1} Projected scorer</p>
+                  <p className="featured-scorer-rank">{featuredScorerLabel}</p>
                   <p className="featured-scorer-name">{scorer.player_name}</p>
-                  <p className="helper-text">{scorer.player_team ?? `${gameResponse.game.away_team} / ${gameResponse.game.home_team}`}</p>
+                  <p className="helper-text">{scorer.team_name ?? scorer.player_team ?? scorer.team}</p>
                 </div>
                 <div className="featured-scorer-metric">
-                  <span className="metric-label">Projected goals (model)</span>
-                  <strong>{formatProjectedGoalTotal(scorer.model_probability)}</strong>
+                  <span className="metric-label">{projectionMetricLabel}</span>
+                  <strong>{formatProbabilityPercent(scorer.model_probability)}</strong>
+                  <span className="helper-text">Model output: {formatProjectedGoalTotal(scorer.model_probability)}</span>
                 </div>
               </li>
             ))}
