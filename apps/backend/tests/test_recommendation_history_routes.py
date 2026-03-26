@@ -1,7 +1,7 @@
 from datetime import date, datetime, time, timezone
 from pathlib import Path
 
-from app.api.routes import get_recommendation_history, get_recommendation_history_availability
+from app.api.routes import export_recommendation_history, get_recommendation_history, get_recommendation_history_availability
 from app.api.schemas import GameSummary, Recommendation
 from app.services.interfaces import ScheduleProvider
 from app.services.provider_wiring import ProviderRegistry
@@ -134,3 +134,27 @@ def test_history_route_loads_persisted_snapshot_from_previous_day(tmp_path: Path
     assert payload.snapshots[0].date == saved_date
     assert payload.snapshots[0].top_overall[0].player_name == "Player Alpha"
     assert reader_recommendation_service.fetch_daily_calls == 0
+
+
+def test_history_export_supports_xlsx_format(tmp_path: Path) -> None:
+    selected_date = date(2026, 3, 24)
+    schedule_provider = _StubScheduleProvider()
+    recommendation_service = _CountingRecommendationService()
+    history_service = RecommendationHistoryService(
+        recommendation_service=recommendation_service,  # type: ignore[arg-type]
+        schedule_provider=schedule_provider,
+        storage_path=tmp_path / "history.json",
+    )
+    history_service.ensure_snapshot(selected_date, "first_goal", now_utc=datetime(2026, 3, 24, 22, 30, tzinfo=timezone.utc))
+    providers = ProviderRegistry(
+        schedule_provider=schedule_provider,
+        projection_provider=None,  # type: ignore[arg-type]
+        odds_provider=None,  # type: ignore[arg-type]
+        recommendation_service=recommendation_service,  # type: ignore[arg-type]
+        recommendation_history_service=history_service,
+    )
+
+    response = export_recommendation_history(format="xlsx", date=selected_date, market="first_goal", providers=providers)
+
+    assert response.media_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert response.headers["content-disposition"] == 'attachment; filename="quick_netters_2026-03-24_first_goal.xlsx"'

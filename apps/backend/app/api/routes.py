@@ -1,6 +1,7 @@
 from datetime import date
 import json
 import logging
+from urllib.parse import quote
 from time import perf_counter
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -400,7 +401,7 @@ def get_recommendation_history_availability(
 
 @router.get("/recommendations/history/export")
 def export_recommendation_history(
-    format: str = Query(default="json", description="Export format: json or csv"),
+    format: str = Query(default="json", description="Export format: json, csv, or xlsx"),
     date: date | None = Query(default=None, description="Optional UTC date filter"),
     market: str | None = Query(default=None, description="Recommendation market: first_goal or anytime"),
     providers: ProviderRegistry = Depends(get_provider_registry),
@@ -411,13 +412,29 @@ def export_recommendation_history(
 
     selected_market = resolve_market(market) if market is not None else None
     normalized_format = format.strip().lower()
+    date_token = date.isoformat() if date is not None else "all_dates"
+    market_token = selected_market or "all_markets"
 
     if normalized_format == "csv":
         payload = history_service.export_csv(selected_date=date, market=selected_market)
-        return Response(content=payload, media_type="text/csv")
+        filename = quote(f"quick_netters_{date_token}_{market_token}.csv")
+        return Response(
+            content=payload,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    if normalized_format == "xlsx":
+        payload = history_service.export_xlsx(selected_date=date, market=selected_market)
+        filename = quote(f"quick_netters_{date_token}_{market_token}.xlsx")
+        return Response(
+            content=payload,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     if normalized_format == "json":
         snapshots = history_service.list_snapshots(selected_date=date, market=selected_market)
         return Response(content=json.dumps({"snapshots": snapshots}), media_type="application/json")
 
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported format. Use json or csv")
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported format. Use json, csv, or xlsx")

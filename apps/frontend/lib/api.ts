@@ -107,7 +107,7 @@ export async function fetchRecommendationHistoryAvailability(
   return fetchJson<HistoricalDateAvailabilityResponse>(`/recommendations/history/availability${query ? `?${query}` : ""}`);
 }
 
-export function recommendationHistoryExportUrl(format: "json" | "csv", date?: string, market?: RecommendationMarket): string {
+export function recommendationHistoryExportUrl(format: "json" | "csv" | "xlsx", date?: string, market?: RecommendationMarket): string {
   const params = new URLSearchParams();
   params.set("format", format);
   if (date) {
