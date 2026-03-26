@@ -7,7 +7,7 @@ export default async function HomePage() {
   return (
     <main className="page">
       <h1>Quick Netters</h1>
-      <p className="subtitle">Pick a date to view the first-goal slate and value picks.</p>
+      <p className="subtitle">Pick a date to view first-goal or anytime goal-scorer value picks.</p>
 
       <section className="card stack-gap">
         <h2>Start here</h2>

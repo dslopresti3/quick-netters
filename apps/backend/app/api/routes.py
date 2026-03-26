@@ -13,6 +13,7 @@ from app.api.schemas import (
     GamesResponse,
 )
 from app.services.provider_wiring import ProviderRegistry
+from app.services.markets import Market, resolve_market
 from app.utils.date_validation import (
     ensure_date_not_more_than_one_day_ahead,
     get_product_rule_window,
@@ -28,7 +29,7 @@ def get_provider_registry(request: Request) -> ProviderRegistry:
     return request.app.state.provider_registry
 
 
-def _build_date_availability(selected_date: date, providers: ProviderRegistry) -> DateAvailabilityResponse:
+def _build_date_availability(selected_date: date, providers: ProviderRegistry, market: Market = "first_goal") -> DateAvailabilityResponse:
     window = get_product_rule_window()
     valid = is_valid_by_product_rule(selected_date)
 
@@ -81,8 +82,8 @@ def _build_date_availability(selected_date: date, providers: ProviderRegistry) -
             messages=messages,
         )
 
-    projections_available = providers.recommendation_service.projections_available(selected_date)
-    odds_available = providers.recommendation_service.odds_available(selected_date)
+    projections_available = providers.recommendation_service.projections_available(selected_date, market=market)
+    odds_available = providers.recommendation_service.odds_available(selected_date, market=market)
 
     if not projections_available:
         status_value = "missing_projections"
@@ -113,8 +114,8 @@ def _build_date_availability(selected_date: date, providers: ProviderRegistry) -
     )
 
 
-def _availability_notes(selected_date: date, providers: ProviderRegistry) -> tuple[bool, bool, list[str]]:
-    metadata = _build_date_availability(selected_date, providers)
+def _availability_notes(selected_date: date, providers: ProviderRegistry, market: Market = "first_goal") -> tuple[bool, bool, list[str]]:
+    metadata = _build_date_availability(selected_date, providers, market=market)
 
     notes: list[str] = []
     if metadata.status == "missing_projections":
@@ -161,17 +162,20 @@ def _with_display_times(games: list[GameSummary], display_timezone: str) -> list
 @router.get("/availability/date", response_model=DateAvailabilityResponse)
 def get_date_availability(
     date: date = Query(..., description="UTC date to validate and check data coverage for"),
+    market: str | None = Query(default=None, description="Recommendation market: first_goal or anytime"),
     providers: ProviderRegistry = Depends(get_provider_registry),
 ) -> DateAvailabilityResponse:
-    return _build_date_availability(date, providers)
+    return _build_date_availability(date, providers, market=resolve_market(market))
 
 
 @router.get("/games", response_model=GamesResponse)
 def get_games(
     date: date = Query(..., description="UTC date to fetch games for"),
+    market: str | None = Query(default=None, description="Recommendation market: first_goal or anytime"),
     timezone: str | None = Query(default=None, description="Optional IANA timezone for display formatting"),
     providers: ProviderRegistry = Depends(get_provider_registry),
 ) -> GamesResponse:
+    selected_market = resolve_market(market)
     request_started = perf_counter()
     logger.info("games route entry", extra={"selected_date": date.isoformat()})
     ensure_date_not_more_than_one_day_ahead(date)
@@ -215,8 +219,8 @@ def get_games(
         projections_available = False
         odds_available = False
     else:
-        projections_available = providers.recommendation_service.projections_available(date)
-        odds_available = providers.recommendation_service.odds_available(date)
+        projections_available = providers.recommendation_service.projections_available(date, market=selected_market)
+        odds_available = providers.recommendation_service.odds_available(date, market=selected_market)
         if not projections_available:
             notes.append("Projections are not available for this date yet. Value picks will appear after model generation runs.")
         if not odds_available:
@@ -252,11 +256,13 @@ def get_games(
 @router.get("/recommendations/daily", response_model=DailyRecommendationsResponse)
 def get_daily_recommendations(
     date: date = Query(..., description="UTC date to fetch recommendations for"),
+    market: str | None = Query(default=None, description="Recommendation market: first_goal or anytime"),
     providers: ProviderRegistry = Depends(get_provider_registry),
 ) -> DailyRecommendationsResponse:
+    selected_market = resolve_market(market)
     ensure_date_not_more_than_one_day_ahead(date)
-    recommendations = providers.recommendation_service.fetch_daily(date)
-    projections_available, odds_available, notes = _availability_notes(date, providers)
+    recommendations = providers.recommendation_service.fetch_daily(date, market=selected_market)
+    projections_available, odds_available, notes = _availability_notes(date, providers, market=selected_market)
     return DailyRecommendationsResponse(
         date=date,
         recommendations=recommendations,
@@ -270,9 +276,11 @@ def get_daily_recommendations(
 def get_game_recommendations(
     game_id: str = Query(..., description="Game id"),
     date: date = Query(..., description="UTC date to fetch game recommendations for"),
+    market: str | None = Query(default=None, description="Recommendation market: first_goal or anytime"),
     timezone: str | None = Query(default=None, description="Optional IANA timezone for display formatting"),
     providers: ProviderRegistry = Depends(get_provider_registry),
 ) -> GameRecommendationsResponse:
+    selected_market = resolve_market(market)
     ensure_date_not_more_than_one_day_ahead(date)
     games = providers.recommendation_service.attach_top_projected_scorers(date, providers.schedule_provider.fetch(date))
     games_by_id = {game.game_id: game for game in games}
@@ -280,8 +288,10 @@ def get_game_recommendations(
     if game_id not in games_by_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Game not found for date")
 
-    top_plays, best_bet, underdog_value_play = providers.recommendation_service.fetch_game_recommendation_buckets(date, game_id)
-    projections_available, odds_available, notes = _availability_notes(date, providers)
+    top_plays, best_bet, underdog_value_play = providers.recommendation_service.fetch_game_recommendation_buckets(
+        date, game_id, market=selected_market
+    )
+    projections_available, odds_available, notes = _availability_notes(date, providers, market=selected_market)
     localized_game = _with_display_times([games_by_id[game_id]], _resolve_display_timezone(timezone))[0]
     return GameRecommendationsResponse(
         date=date,

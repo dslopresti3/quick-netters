@@ -249,6 +249,35 @@ def test_the_odds_api_client_event_level_odds_request_uses_expected_params() -> 
     }
 
 
+def test_the_odds_api_client_event_level_odds_request_supports_anytime_market() -> None:
+    event_odds_payload = {"id": "evt-1", "bookmakers": []}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self, *args, **kwargs):
+            return json.dumps(event_odds_payload).encode("utf-8")
+
+    requested_urls: list[str] = []
+
+    def _fake_urlopen(request, timeout=10):  # noqa: ANN001
+        requested_urls.append(request.full_url)
+        return _Response()
+
+    client = TheOddsApiClient(api_key="test-key")
+    with patch("app.services.odds_provider.urlopen", side_effect=_fake_urlopen):
+        payload = client._fetch_event_odds("evt-1", odds_api_market_key="player_goal_scorer_anytime")
+
+    assert payload == event_odds_payload
+    parsed = urlparse(requested_urls[0])
+    query = parse_qs(parsed.query)
+    assert query["markets"] == ["player_goal_scorer_anytime"]
+
+
 def test_the_odds_api_adapter_uses_description_for_generic_yes_no_outcome_names() -> None:
     now = datetime(2026, 3, 25, 22, 0, tzinfo=timezone.utc)
     raw_events = [

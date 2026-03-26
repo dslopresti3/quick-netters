@@ -4,6 +4,7 @@ from datetime import date, datetime, time, timedelta, timezone
 
 from app.api.schemas import GameSummary
 from app.services.interfaces import OddsProvider, PlayerProjectionCandidate, ProjectionProvider, ScheduleProvider
+from app.services.markets import Market
 from app.services.odds import NormalizedPlayerOdds
 from app.services.odds_provider import LiveOddsProvider
 from app.services.projection_store import build_mock_projection_provider
@@ -44,8 +45,8 @@ class MockOddsService(OddsProvider):
     def __init__(self) -> None:
         self._provider = LiveOddsProvider()
 
-    def fetch_player_first_goal_odds(self, selected_date: date) -> list[NormalizedPlayerOdds]:
-        return self._provider.fetch_player_first_goal_odds(selected_date)
+    def fetch_player_first_goal_odds(self, selected_date: date, market: Market = "first_goal") -> list[NormalizedPlayerOdds]:
+        return self._provider.fetch_player_first_goal_odds(selected_date, market=market)
 
 
 class MockRecommendationsService(ValueRecommendationService):

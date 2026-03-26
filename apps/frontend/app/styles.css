@@ -74,6 +74,31 @@ h1, h2, h3 { margin: 0; }
   font-weight: 600;
 }
 
+.market-toggle {
+  display: inline-flex;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.market-toggle-option {
+  padding: 0.35rem 0.8rem;
+  text-decoration: none;
+  color: #374151;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.market-toggle-option + .market-toggle-option {
+  border-left: 1px solid #d1d5db;
+}
+
+.market-toggle-option.is-active {
+  background: #1d4ed8;
+  color: #fff;
+}
+
 .candidate-list {
   margin: 0;
   padding-left: 1.2rem;

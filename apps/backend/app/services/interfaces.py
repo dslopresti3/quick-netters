@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from app.api.schemas import GameSummary, Recommendation
+from app.services.markets import Market
 from app.services.odds import NormalizedPlayerOdds
 
 
@@ -58,27 +59,27 @@ class ProjectionProvider(ABC):
 
 class OddsProvider(ABC):
     @abstractmethod
-    def fetch_player_first_goal_odds(self, selected_date: date) -> list[NormalizedPlayerOdds]:
-        """Return normalized first-goal player odds snapshots for a date."""
+    def fetch_player_first_goal_odds(self, selected_date: date, market: Market = "first_goal") -> list[NormalizedPlayerOdds]:
+        """Return normalized player scorer odds snapshots for a date/market."""
 
 
 class RecommendationsProvider(ABC):
     @abstractmethod
-    def fetch_daily(self, selected_date: date) -> list[Recommendation]:
+    def fetch_daily(self, selected_date: date, market: Market = "first_goal") -> list[Recommendation]:
         """Return top daily recommendations for a date."""
 
     @abstractmethod
-    def fetch_for_game(self, selected_date: date, game_id: str) -> list[Recommendation]:
+    def fetch_for_game(self, selected_date: date, game_id: str, market: Market = "first_goal") -> list[Recommendation]:
         """Return recommendations for one game/date."""
 
 
 class AvailabilityProvider(ABC):
     @abstractmethod
-    def projections_available(self, selected_date: date) -> bool:
+    def projections_available(self, selected_date: date, market: Market = "first_goal") -> bool:
         """Return whether projections exist for a given date."""
 
     @abstractmethod
-    def odds_available(self, selected_date: date) -> bool:
+    def odds_available(self, selected_date: date, market: Market = "first_goal") -> bool:
         """Return whether odds exist for a given date."""
 
 

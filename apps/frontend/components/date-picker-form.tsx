@@ -9,9 +9,10 @@ type DatePickerFormProps = {
   maxDate: string;
   submitLabel: string;
   actionPath: string;
+  market?: "first_goal" | "anytime";
 };
 
-export function DatePickerForm({ defaultDate, minDate, maxDate, submitLabel, actionPath }: DatePickerFormProps) {
+export function DatePickerForm({ defaultDate, minDate, maxDate, submitLabel, actionPath, market = "first_goal" }: DatePickerFormProps) {
   const router = useRouter();
   const [selectedDate, setSelectedDate] = useState(defaultDate);
   const [isPending, startTransition] = useTransition();
@@ -20,7 +21,7 @@ export function DatePickerForm({ defaultDate, minDate, maxDate, submitLabel, act
     event.preventDefault();
     const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "America/New_York";
     startTransition(() => {
-      router.push(`${actionPath}?date=${selectedDate}&timezone=${encodeURIComponent(userTimezone)}`);
+      router.push(`${actionPath}?date=${selectedDate}&timezone=${encodeURIComponent(userTimezone)}&market=${market}`);
     });
   };
 

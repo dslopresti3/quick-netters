@@ -17,6 +17,7 @@ from app.services.interfaces import (
     RecommendationsProvider,
     ScheduleProvider,
 )
+from app.services.markets import Market
 from app.services.odds import (
     NormalizedPlayerOdds,
     OddsEventMapping,
@@ -55,37 +56,40 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         self._projection_provider = projection_provider
         self._odds_provider = odds_provider
         self._projection_cache_by_date: dict[date, list[PlayerProjectionCandidate]] = {}
-        self._odds_cache_by_date: dict[date, list[NormalizedPlayerOdds]] = {}
+        self._odds_cache_by_date_market: dict[tuple[date, Market], list[NormalizedPlayerOdds]] = {}
 
-    def fetch_daily(self, selected_date: date) -> list[Recommendation]:
-        recommendations = self._build_ranked_recommendations(selected_date)
+    def fetch_daily(self, selected_date: date, market: Market = "first_goal") -> list[Recommendation]:
+        recommendations = self._build_ranked_recommendations(selected_date, market=market)
         return recommendations[:3]
 
-    def fetch_for_game(self, selected_date: date, game_id: str) -> list[Recommendation]:
-        top_plays, _, _ = self.fetch_game_recommendation_buckets(selected_date, game_id)
+    def fetch_for_game(self, selected_date: date, game_id: str, market: Market = "first_goal") -> list[Recommendation]:
+        top_plays, _, _ = self.fetch_game_recommendation_buckets(selected_date, game_id, market=market)
         return top_plays
 
     def fetch_game_recommendation_buckets(
         self,
         selected_date: date,
         game_id: str,
+        market: Market = "first_goal",
     ) -> tuple[list[Recommendation], Recommendation | None, Recommendation | None]:
-        game_recommendations = [recommendation for recommendation in self._build_ranked_recommendations(selected_date) if recommendation.game_id == game_id]
+        game_recommendations = [
+            recommendation for recommendation in self._build_ranked_recommendations(selected_date, market=market) if recommendation.game_id == game_id
+        ]
         top_plays, best_bet = _select_top_play_bucket(game_recommendations)
         underdog = _select_underdog_bucket(game_recommendations, best_bet=best_bet)
         return top_plays, best_bet, underdog
 
-    def projections_available(self, selected_date: date) -> bool:
+    def projections_available(self, selected_date: date, market: Market = "first_goal") -> bool:
         games = self._schedule_provider.fetch(selected_date)
         _, projections_available = self._build_top_projection_lookup(selected_date, games)
         return projections_available
 
-    def odds_available(self, selected_date: date) -> bool:
+    def odds_available(self, selected_date: date, market: Market = "first_goal") -> bool:
         scheduled_games = self._schedule_provider.fetch(selected_date)
         projections = self._eligible_projection_candidates(selected_date, scheduled_games)
         if not projections:
             return False
-        snapshots = self._odds_rows_for_date(selected_date)
+        snapshots = self._odds_rows_for_date(selected_date, market=market)
         mapped_rows = self._map_odds_rows(selected_date, scheduled_games, projections, snapshots)
         return any(_is_valid_matched_odds_row(row) for row in mapped_rows)
 
@@ -195,12 +199,12 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
 
         return top_by_game_team, attached_projection_count > 0
 
-    def _build_ranked_recommendations(self, selected_date: date) -> list[Recommendation]:
+    def _build_ranked_recommendations(self, selected_date: date, market: Market = "first_goal") -> list[Recommendation]:
         scheduled_games = self._schedule_provider.fetch(selected_date)
         projections = self._eligible_projection_candidates(selected_date, scheduled_games)
         if not projections:
             return []
-        raw_odds_snapshots = self._odds_rows_for_date(selected_date)
+        raw_odds_snapshots = self._odds_rows_for_date(selected_date, market=market)
         odds_snapshots = self._map_odds_rows(selected_date, scheduled_games, projections, raw_odds_snapshots)
         games_by_id = {game.game_id: game for game in scheduled_games}
         projections_by_game_player = {(row.game_id, row.nhl_player_id): row for row in projections}
@@ -323,12 +327,16 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         self._projection_cache_by_date[selected_date] = rows
         return rows
 
-    def _odds_rows_for_date(self, selected_date: date) -> list[NormalizedPlayerOdds]:
-        cached = self._odds_cache_by_date.get(selected_date)
+    def _odds_rows_for_date(self, selected_date: date, market: Market = "first_goal") -> list[NormalizedPlayerOdds]:
+        cache_key = (selected_date, market)
+        cached = self._odds_cache_by_date_market.get(cache_key)
         if cached is not None:
             return cached
-        rows = self._odds_provider.fetch_player_first_goal_odds(selected_date)
-        self._odds_cache_by_date[selected_date] = rows
+        try:
+            rows = self._odds_provider.fetch_player_first_goal_odds(selected_date, market=market)
+        except TypeError:
+            rows = self._odds_provider.fetch_player_first_goal_odds(selected_date)
+        self._odds_cache_by_date_market[cache_key] = rows
         return rows
 
     def _map_odds_rows(
