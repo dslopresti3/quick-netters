@@ -2,10 +2,27 @@ export type RecommendationMarket = "first_goal" | "anytime";
 
 export const DEFAULT_MARKET: RecommendationMarket = "first_goal";
 
+const MARKET_DISPLAY_LABELS: Record<RecommendationMarket, string> = {
+  first_goal: "First Goal",
+  anytime: "Anytime",
+};
+
 export function resolveMarket(rawMarket?: string): RecommendationMarket {
   return rawMarket === "anytime" ? "anytime" : DEFAULT_MARKET;
 }
 
 export function marketLabel(market: RecommendationMarket): string {
-  return market === "anytime" ? "Anytime Goal Scorer" : "First Goal Scorer";
+  return MARKET_DISPLAY_LABELS[market];
+}
+
+export function marketDescriptor(market: RecommendationMarket): string {
+  return `${marketLabel(market)} market`;
+}
+
+export function marketScoreVerb(market: RecommendationMarket): string {
+  return market === "anytime" ? "scores a goal" : "scores the first goal";
+}
+
+export function marketSeasonMetricLabel(market: RecommendationMarket): string {
+  return market === "anytime" ? "Goals this year" : "First goals this year";
 }

@@ -85,7 +85,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
     <main className="page stack-gap-lg">
       <header>
         <h1>Daily Slate</h1>
-        <p className="subtitle">{selectedDate} · {marketTitle} market</p>
+        <p className="subtitle">Date: {selectedDate} · Market: {marketTitle}</p>
         <MarketToggle selectedDate={selectedDate} displayTimezone={displayTimezone} selectedMarket={selectedMarket} path="/slate" />
         <Link href={`/history?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">View historical picks</Link>
       </header>
@@ -125,7 +125,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
       )}
 
       <section className="card stack-gap">
-        <h2>Top 3 overall value picks · {marketTitle}</h2>
+        <h2>Top 3 Plays · {marketTitle}</h2>
         {!availability.projections_available ? (
           <p className="empty-state">Schedule is posted, but projections are still pending for this date.</p>
         ) : !availability.odds_available ? (
@@ -135,7 +135,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
         ) : (
           <div className="recommendation-grid">
             {dailyRecommendations.recommendations.slice(0, 3).map((pick, index) => (
-              <RecommendationCard key={`${pick.game_id}-${pick.player_id}`} recommendation={pick} rank={index + 1} />
+              <RecommendationCard key={`${pick.game_id}-${pick.player_id}`} recommendation={pick} rank={index + 1} market={selectedMarket} />
             ))}
           </div>
         )}
