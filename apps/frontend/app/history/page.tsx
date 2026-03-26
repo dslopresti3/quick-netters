@@ -78,6 +78,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
         <div className="stack-gap-sm">
           <Link href={recommendationHistoryExportUrl("json", selectedDate, selectedMarket)} className="secondary-link">Export JSON (locked data)</Link>
           <Link href={recommendationHistoryExportUrl("csv", selectedDate, selectedMarket)} className="secondary-link">Export CSV (locked data)</Link>
+          <Link href={recommendationHistoryExportUrl("xlsx", selectedDate, selectedMarket)} className="secondary-link">Export Excel (locked data)</Link>
         </div>
       </section>
 

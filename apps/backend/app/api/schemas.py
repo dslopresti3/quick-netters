@@ -134,6 +134,11 @@ class LockedRecommendationSnapshot(APIModel):
     date: DateType
     market: Literal["first_goal", "anytime"]
     snapshot_created_at: datetime
+    snapshot_timestamp: datetime | None = None
+    locked_at: datetime | None = None
+    is_locked: bool = True
+    model_version: str | None = None
+    app_version: str | None = None
     earliest_game_time_et: datetime
     lock_cutoff_et: datetime
     top_overall: list[Recommendation] = Field(default_factory=list)
