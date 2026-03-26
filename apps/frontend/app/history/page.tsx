@@ -118,7 +118,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
                   <h4>Best Bet</h4>
                   {gameSnapshot.best_bet ? <RecommendationCard recommendation={gameSnapshot.best_bet} market={selectedMarket} /> : <p className="empty-state">No best bet stored.</p>}
                   <h4>Underdog Value Play</h4>
-                  {gameSnapshot.underdog_value_play ? <RecommendationCard recommendation={gameSnapshot.underdog_value_play} market={selectedMarket} /> : <p className="empty-state">No underdog play stored.</p>}
+                  {gameSnapshot.underdog_value_play ? <RecommendationCard recommendation={gameSnapshot.underdog_value_play} market={selectedMarket} /> : <p className="empty-state">No underdog value play stored.</p>}
                 </div>
               </article>
             ))}
