@@ -1,19 +1,24 @@
 import Link from "next/link";
 import { DatePickerForm } from "../../components/date-picker-form";
+import { MarketToggle } from "../../components/market-toggle";
 import { RecommendationCard } from "../../components/recommendation-card";
 import { fetchDailyRecommendationsByDate, fetchDateAvailability, fetchGamesByDate, getCurrentUtcDate, resolveDisplayTimezone } from "../../lib/api";
+import { marketLabel, resolveMarket } from "../../lib/market";
 
 type SlatePageProps = {
   searchParams?: {
     date?: string;
     timezone?: string;
+    market?: string;
   };
 };
 
 export default async function SlatePage({ searchParams }: SlatePageProps) {
   const selectedDate = searchParams?.date ?? getCurrentUtcDate();
+  const selectedMarket = resolveMarket(searchParams?.market);
   const displayTimezone = resolveDisplayTimezone(searchParams?.timezone);
-  const availability = await fetchDateAvailability(selectedDate);
+  const marketTitle = marketLabel(selectedMarket);
+  const availability = await fetchDateAvailability(selectedDate, selectedMarket);
 
   if (!availability.valid_by_product_rule) {
     return (
@@ -32,6 +37,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
             maxDate={availability.max_allowed_date}
             submitLabel="Reload slate"
             actionPath="/slate"
+            market={selectedMarket}
           />
           <Link href="/" className="secondary-link">Back home</Link>
         </section>
@@ -55,6 +61,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
             maxDate={availability.max_allowed_date}
             submitLabel="Update slate"
             actionPath="/slate"
+            market={selectedMarket}
           />
         </section>
 
@@ -70,15 +77,16 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
     );
   }
 
-  const gamesResponse = await fetchGamesByDate(selectedDate, displayTimezone);
+  const gamesResponse = await fetchGamesByDate(selectedDate, displayTimezone, selectedMarket);
   const shouldLoadRecommendations = availability.projections_available && availability.odds_available;
-  const dailyRecommendations = shouldLoadRecommendations ? await fetchDailyRecommendationsByDate(selectedDate) : null;
+  const dailyRecommendations = shouldLoadRecommendations ? await fetchDailyRecommendationsByDate(selectedDate, selectedMarket) : null;
 
   return (
     <main className="page stack-gap-lg">
       <header>
         <h1>Daily Slate</h1>
-        <p className="subtitle">{selectedDate} · Scheduled games, projections, and value picks</p>
+        <p className="subtitle">{selectedDate} · {marketTitle} market</p>
+        <MarketToggle selectedDate={selectedDate} displayTimezone={displayTimezone} selectedMarket={selectedMarket} path="/slate" />
       </header>
 
       <section className="card stack-gap">
@@ -89,6 +97,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
           maxDate={availability.max_allowed_date}
           submitLabel="Update slate"
           actionPath="/slate"
+          market={selectedMarket}
         />
       </section>
 
@@ -115,7 +124,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
       )}
 
       <section className="card stack-gap">
-        <h2>Top 3 overall value picks</h2>
+        <h2>Top 3 overall value picks · {marketTitle}</h2>
         {!availability.projections_available ? (
           <p className="empty-state">Schedule is posted, but projections are still pending for this date.</p>
         ) : !availability.odds_available ? (
@@ -140,7 +149,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
         ) : (
           <div className="game-grid">
             {gamesResponse.games.map((game) => (
-              <Link href={`/games/${game.game_id}?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}`} key={game.game_id} className="card game-card-link stack-gap-sm">
+              <Link href={`/games/${game.game_id}?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} key={game.game_id} className="card game-card-link stack-gap-sm">
                 <p className="helper-text">{game.display_game_time ?? new Date(game.game_time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: displayTimezone })} {game.display_timezone ?? displayTimezone}</p>
                 <h3>{game.away_team} @ {game.home_team}</h3>
                 {game.away_top_projected_scorer && game.home_top_projected_scorer ? (

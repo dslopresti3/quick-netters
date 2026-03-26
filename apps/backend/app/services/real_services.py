@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from app.api.schemas import GameSummary
 from app.services.http_client import BROWSER_LIKE_HEADERS, build_no_proxy_opener, fetch_json
 from app.services.interfaces import OddsProvider, PlayerProjectionCandidate, ProjectionProvider, ScheduleProvider
+from app.services.markets import Market
 from app.services.odds import NormalizedPlayerOdds
 
 logger = logging.getLogger(__name__)
@@ -219,5 +220,5 @@ class EmptyProjectionProvider(ProjectionProvider):
 class EmptyOddsProvider(OddsProvider):
     """Production wiring placeholder until live odds integration is added."""
 
-    def fetch_player_first_goal_odds(self, selected_date: date) -> list[NormalizedPlayerOdds]:
+    def fetch_player_first_goal_odds(self, selected_date: date, market: Market = "first_goal") -> list[NormalizedPlayerOdds]:
         return []

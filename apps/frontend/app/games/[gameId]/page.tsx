@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { MarketToggle } from "../../../components/market-toggle";
 import { RecommendationCard } from "../../../components/recommendation-card";
 import type { Recommendation, TeamProjectionLeader } from "../../../lib/interfaces";
 import { fetchDateAvailability, fetchGameRecommendations, getCurrentUtcDate, resolveDisplayTimezone } from "../../../lib/api";
+import { marketLabel, resolveMarket } from "../../../lib/market";
 
 type GameDetailPageProps = {
   params: {
@@ -10,6 +12,7 @@ type GameDetailPageProps = {
   searchParams?: {
     date?: string;
     timezone?: string;
+    market?: string;
   };
 };
 
@@ -53,8 +56,10 @@ function RecommendationSection({
 
 export default async function GameDetailPage({ params, searchParams }: GameDetailPageProps) {
   const selectedDate = searchParams?.date ?? getCurrentUtcDate();
+  const selectedMarket = resolveMarket(searchParams?.market);
+  const selectedMarketLabel = marketLabel(selectedMarket);
   const displayTimezone = resolveDisplayTimezone(searchParams?.timezone);
-  const availability = await fetchDateAvailability(selectedDate);
+  const availability = await fetchDateAvailability(selectedDate, selectedMarket);
 
   if (!availability.valid_by_product_rule) {
     return (
@@ -67,7 +72,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
               <li key={message}>{message}</li>
             ))}
           </ul>
-          <Link href={`/slate?date=${availability.min_allowed_date}&timezone=${encodeURIComponent(displayTimezone)}`} className="secondary-link">Back to slate</Link>
+          <Link href={`/slate?date=${availability.min_allowed_date}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">Back to slate</Link>
         </section>
       </main>
     );
@@ -85,12 +90,12 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
             ))}
           </ul>
         </section>
-        <Link href={`/slate?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}`} className="secondary-link">Back to slate</Link>
+        <Link href={`/slate?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">Back to slate</Link>
       </main>
     );
   }
 
-  const gameResponse = await fetchGameRecommendations(params.gameId, selectedDate, displayTimezone);
+  const gameResponse = await fetchGameRecommendations(params.gameId, selectedDate, displayTimezone, selectedMarket);
 
   if (!gameResponse) {
     return (
@@ -99,7 +104,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
         <section className="card">
           <p className="empty-state">No game detail exists for this matchup and date yet.</p>
         </section>
-        <Link href={`/slate?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}`} className="secondary-link">Back to slate</Link>
+        <Link href={`/slate?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">Back to slate</Link>
       </main>
     );
   }
@@ -120,7 +125,9 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
         <p className="subtitle">{gameResponse.date}</p>
         <h1>{gameResponse.game.away_team} @ {gameResponse.game.home_team}</h1>
         <p className="helper-text">Start {gameResponse.game.display_game_time ?? new Date(gameResponse.game.game_time).toLocaleString("en-US", { timeZone: displayTimezone })} {gameResponse.game.display_timezone ?? displayTimezone}</p>
-        <Link href={`/slate?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}`} className="secondary-link">← Back to slate</Link>
+        <p className="helper-text">Market: {selectedMarketLabel}</p>
+        <MarketToggle selectedDate={selectedDate} displayTimezone={displayTimezone} selectedMarket={selectedMarket} path={`/games/${params.gameId}`} />
+        <Link href={`/slate?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">← Back to slate</Link>
       </header>
 
       {gameResponse.notes.length > 0 && (
@@ -173,12 +180,12 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
 
       {!availability.projections_available ? (
         <section className="card stack-gap">
-          <h2>Recommendations</h2>
+          <h2>Recommendations · {selectedMarketLabel}</h2>
           <p className="empty-state">This game is scheduled, but projections are not available yet.</p>
         </section>
       ) : !availability.odds_available ? (
         <section className="card stack-gap">
-          <h2>Recommendations</h2>
+          <h2>Recommendations · {selectedMarketLabel}</h2>
           <p className="empty-state">Projections are available, but market odds are not posted yet.</p>
         </section>
       ) : (

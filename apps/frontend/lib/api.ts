@@ -4,6 +4,7 @@ import type {
   GameRecommendationsResponse,
   GamesResponse,
 } from "./interfaces";
+import type { RecommendationMarket } from "./market";
 
 const API_BASE_URL = process.env.API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -44,23 +45,30 @@ async function fetchJson<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function fetchDateAvailability(date: string): Promise<DateAvailabilityResponse> {
-  return fetchJson<DateAvailabilityResponse>(`/availability/date?date=${encodeURIComponent(date)}`);
+export async function fetchDateAvailability(date: string, market: RecommendationMarket = "first_goal"): Promise<DateAvailabilityResponse> {
+  return fetchJson<DateAvailabilityResponse>(`/availability/date?date=${encodeURIComponent(date)}&market=${encodeURIComponent(market)}`);
 }
 
-export async function fetchGamesByDate(date: string, timezone?: string): Promise<GamesResponse> {
+export async function fetchGamesByDate(date: string, timezone?: string, market: RecommendationMarket = "first_goal"): Promise<GamesResponse> {
   const timezoneParam = resolveDisplayTimezone(timezone);
-  return fetchJson<GamesResponse>(`/games?date=${encodeURIComponent(date)}&timezone=${encodeURIComponent(timezoneParam)}`);
+  return fetchJson<GamesResponse>(`/games?date=${encodeURIComponent(date)}&timezone=${encodeURIComponent(timezoneParam)}&market=${encodeURIComponent(market)}`);
 }
 
-export async function fetchDailyRecommendationsByDate(date: string): Promise<DailyRecommendationsResponse> {
-  return fetchJson<DailyRecommendationsResponse>(`/recommendations/daily?date=${encodeURIComponent(date)}`);
+export async function fetchDailyRecommendationsByDate(date: string, market: RecommendationMarket = "first_goal"): Promise<DailyRecommendationsResponse> {
+  return fetchJson<DailyRecommendationsResponse>(`/recommendations/daily?date=${encodeURIComponent(date)}&market=${encodeURIComponent(market)}`);
 }
 
-export async function fetchGameRecommendations(gameId: string, date: string, timezone?: string): Promise<GameRecommendationsResponse | null> {
+export async function fetchGameRecommendations(
+  gameId: string,
+  date: string,
+  timezone?: string,
+  market: RecommendationMarket = "first_goal",
+): Promise<GameRecommendationsResponse | null> {
   try {
     const timezoneParam = resolveDisplayTimezone(timezone);
-    return await fetchJson<GameRecommendationsResponse>(`/recommendations/game?game_id=${encodeURIComponent(gameId)}&date=${encodeURIComponent(date)}&timezone=${encodeURIComponent(timezoneParam)}`);
+    return await fetchJson<GameRecommendationsResponse>(
+      `/recommendations/game?game_id=${encodeURIComponent(gameId)}&date=${encodeURIComponent(date)}&timezone=${encodeURIComponent(timezoneParam)}&market=${encodeURIComponent(market)}`,
+    );
   } catch (error) {
     if (error instanceof Error && error.message.toLowerCase().includes("not found")) {
       return null;

@@ -50,7 +50,7 @@ class StubProjectionProvider(ProjectionProvider):
 
 
 class StubOddsProvider(OddsProvider):
-    def fetch_player_first_goal_odds(self, selected_date: date) -> list[NormalizedPlayerOdds]:
+    def fetch_player_first_goal_odds(self, selected_date: date, market: str = "first_goal") -> list[NormalizedPlayerOdds]:
         return [
             NormalizedPlayerOdds(
                 nhl_game_id="g-custom-vs-test",
@@ -183,6 +183,14 @@ def test_game_recommendations_route_uses_injected_registry() -> None:
     assert payload.best_bet is not None
     assert payload.best_bet.player_id == "p-custom"
     assert payload.underdog_value_play is None
+
+
+def test_daily_recommendations_route_supports_anytime_market() -> None:
+    selected_date = date.today()
+    payload = get_daily_recommendations(date=selected_date, market="anytime", providers=_provider_registry())
+
+    assert payload.odds_available is True
+    assert payload.recommendations[0].player_id == "p-custom"
 
 
 class _StubRawOddsClient:

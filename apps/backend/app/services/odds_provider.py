@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 from app.services.interfaces import OddsProvider
+from app.services.markets import Market, odds_api_market_key_for_market
 from app.services.odds import NormalizedPlayerOdds, STALE_ODDS_THRESHOLD, normalize_snapshot_timestamp
 
 
@@ -20,20 +21,21 @@ class TheOddsApiClient:
     event_odds_url_template = "https://api.the-odds-api.com/v4/sports/icehockey_nhl/events/{event_id}/odds"
     provider_name = "the-odds-api"
     first_goal_market_key = "player_goal_scorer_first"
+    anytime_goal_market_key = "player_goal_scorer_anytime"
     slate_timezone = ZoneInfo("America/New_York")
 
     def __init__(self, api_key: str | None = None, timeout_seconds: int = 10) -> None:
         self._api_key = api_key or os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY")
         self._timeout_seconds = timeout_seconds
 
-    def fetch_raw_events(self, selected_date: date) -> list[dict[str, Any]]:
+    def fetch_raw_events(self, selected_date: date, market: Market = "first_goal") -> list[dict[str, Any]]:
         if not self._api_key:
             return []
 
         event_ids = self.fetch_event_ids_for_slate(selected_date)
         raw_events: list[dict[str, Any]] = []
         for event_id in event_ids:
-            raw_event = self._fetch_event_odds(event_id=event_id)
+            raw_event = self._fetch_event_odds(event_id=event_id, odds_api_market_key=odds_api_market_key_for_market(market))
             if raw_event is None:
                 continue
             raw_events.append(raw_event)
@@ -74,13 +76,14 @@ class TheOddsApiClient:
             return []
         return [event for event in event_payload if isinstance(event, dict)]
 
-    def _fetch_event_odds(self, event_id: str) -> dict[str, Any] | None:
+    def _fetch_event_odds(self, event_id: str, odds_api_market_key: str | None = None) -> dict[str, Any] | None:
+        market_key = odds_api_market_key or self.first_goal_market_key
         params = urlencode(
             {
                 "apiKey": self._api_key,
                 "regions": "us",
                 "bookmakers": "draftkings",
-                "markets": self.first_goal_market_key,
+                "markets": market_key,
                 "oddsFormat": "american",
                 "dateFormat": "iso",
             }
@@ -103,15 +106,19 @@ class TheOddsApiClient:
 class TheOddsApiAdapter:
     """Normalize The Odds API payloads into app-internal odds snapshots."""
 
-    market_key = TheOddsApiClient.first_goal_market_key
-
     def __init__(self, source_name: str, stale_threshold: timedelta = STALE_ODDS_THRESHOLD) -> None:
         self._source_name = source_name
         self._stale_threshold = stale_threshold
 
-    def normalize(self, raw_events: list[dict[str, Any]], now: datetime | None = None) -> list[NormalizedPlayerOdds]:
+    def normalize(
+        self,
+        raw_events: list[dict[str, Any]],
+        now: datetime | None = None,
+        odds_api_market_key: str | None = None,
+    ) -> list[NormalizedPlayerOdds]:
         normalized_rows: list[NormalizedPlayerOdds] = []
         reference_now = now or datetime.now(timezone.utc)
+        market_key = odds_api_market_key or TheOddsApiClient.first_goal_market_key
 
         for event in raw_events:
             provider_event_id = self._extract_event_id(event)
@@ -132,7 +139,7 @@ class TheOddsApiAdapter:
                     continue
 
                 for market in markets:
-                    if not isinstance(market, dict) or market.get("key") != self.market_key:
+                    if not isinstance(market, dict) or market.get("key") != market_key:
                         continue
 
                     snapshot_at = self._extract_snapshot_timestamp(market, bookmaker, reference_now)
@@ -260,9 +267,13 @@ class LiveOddsProvider(OddsProvider):
         self._client = client or TheOddsApiClient()
         self._adapter = adapter or TheOddsApiAdapter(source_name=self._client.provider_name)
 
-    def fetch_player_first_goal_odds(self, selected_date: date) -> list[NormalizedPlayerOdds]:
-        raw_events = self._client.fetch_raw_events(selected_date)
-        return self._adapter.normalize(raw_events)
+    def fetch_player_first_goal_odds(self, selected_date: date, market: Market = "first_goal") -> list[NormalizedPlayerOdds]:
+        odds_api_market_key = odds_api_market_key_for_market(market)
+        try:
+            raw_events = self._client.fetch_raw_events(selected_date, market=market)
+        except TypeError:
+            raw_events = self._client.fetch_raw_events(selected_date)
+        return self._adapter.normalize(raw_events, odds_api_market_key=odds_api_market_key)
 
 
 
