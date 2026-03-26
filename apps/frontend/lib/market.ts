@@ -23,6 +23,21 @@ export function marketScoreVerb(market: RecommendationMarket): string {
   return market === "anytime" ? "scores a goal" : "scores the first goal";
 }
 
-export function marketSeasonMetricLabel(market: RecommendationMarket): string {
-  return market === "anytime" ? "Goals this year" : "First goals this year";
+export type SeasonProductionLabels = {
+  left: string;
+  right: string;
+};
+
+export function marketSeasonProductionLabels(market: RecommendationMarket): SeasonProductionLabels {
+  if (market === "anytime") {
+    return {
+      left: "Goals scored",
+      right: "First goals scored",
+    };
+  }
+
+  return {
+    left: "Goals this year",
+    right: "First goals this year",
+  };
 }

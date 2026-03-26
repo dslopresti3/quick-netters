@@ -1,6 +1,6 @@
 import type { Recommendation } from "../lib/interfaces";
 import type { RecommendationMarket } from "../lib/market";
-import { marketLabel, marketScoreVerb, marketSeasonMetricLabel } from "../lib/market";
+import { marketLabel, marketScoreVerb, marketSeasonProductionLabels } from "../lib/market";
 
 type RecommendationCardProps = {
   recommendation: Recommendation;
@@ -34,7 +34,7 @@ function MetricLabel({ label, tooltip }: MetricLabelProps) {
 
 export function RecommendationCard({ recommendation, rank, market = "first_goal" }: RecommendationCardProps) {
   const marketName = marketLabel(market);
-  const seasonMetricLabel = marketSeasonMetricLabel(market);
+  const seasonProductionLabels = marketSeasonProductionLabels(market);
 
   return (
     <article className="recommendation-card stack-gap-sm">
@@ -102,15 +102,15 @@ export function RecommendationCard({ recommendation, rank, market = "first_goal"
         </div>
       </section>
 
-      <section className="metrics-section">
+      <section className="metrics-section metrics-section-season-production">
         <p className="metrics-heading">Season production</p>
         <div className="supporting-metrics-grid">
           <div className="supporting-metric">
-            <span className="metric-label">Goals this year</span>
+            <span className="metric-label">{seasonProductionLabels.left}</span>
             <strong>{recommendation.goals_this_year ?? "-"}</strong>
           </div>
           <div className="supporting-metric">
-            <span className="metric-label">{seasonMetricLabel}</span>
+            <span className="metric-label">{seasonProductionLabels.right}</span>
             <strong>{recommendation.first_goals_this_year ?? "-"}</strong>
           </div>
         </div>
