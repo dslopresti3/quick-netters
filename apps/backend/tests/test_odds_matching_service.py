@@ -634,6 +634,55 @@ def test_underdog_bucket_returns_none_when_no_candidate_qualifies() -> None:
     assert underdog is None
 
 
+def test_anytime_game_bucket_uses_anytime_probabilities_and_anytime_odds_thresholds() -> None:
+    selected_date = date.today()
+    game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)
+    game = GameSummary(game_id="2026020405", game_time=game_time, away_team="NY Rangers", home_team="Boston Bruins")
+    projections = [
+        PlayerProjectionCandidate(
+            game_id="2026020405",
+            nhl_player_id="p1",
+            player_name="Anytime One",
+            projected_team_name="NY Rangers",
+            model_probability=0.04,
+            first_goal_probability=0.04,
+            anytime_probability=0.42,
+            historical_production=PlayerHistoricalProduction(season_games_played=65, season_first_goals=3),
+            roster_eligibility=PlayerRosterEligibility(active_team_name="NY Rangers", is_active_roster=True),
+        ),
+        PlayerProjectionCandidate(
+            game_id="2026020405",
+            nhl_player_id="p2",
+            player_name="Anytime Two",
+            projected_team_name="NY Rangers",
+            model_probability=0.03,
+            first_goal_probability=0.03,
+            anytime_probability=0.31,
+            historical_production=PlayerHistoricalProduction(season_games_played=60, season_first_goals=2),
+            roster_eligibility=PlayerRosterEligibility(active_team_name="NY Rangers", is_active_roster=True),
+        ),
+    ]
+    odds_rows = [
+        _raw_odds("Anytime One", "NY Rangers", "Boston Bruins", game_time, team="NY Rangers", nhl_player_id="p1", market_odds_american=180),
+        _raw_odds("Anytime Two", "NY Rangers", "Boston Bruins", game_time, team="NY Rangers", nhl_player_id="p2", market_odds_american=350),
+    ]
+
+    service = ValueRecommendationService(
+        schedule_provider=StaticScheduleProvider([game]),
+        projection_provider=StaticProjectionProvider(projections),
+        odds_provider=StaticOddsProvider(odds_rows),
+    )
+
+    top_plays, best_bet, underdog = service.fetch_game_recommendation_buckets(selected_date, "2026020405", market="anytime")
+
+    assert top_plays
+    assert top_plays[0].model_probability == 0.42
+    assert best_bet is not None
+    assert best_bet.player_id == "p1"
+    assert underdog is not None
+    assert underdog.player_id == "p2"
+
+
 def test_recommendation_ranking_balances_probability_value_and_confidence() -> None:
     selected_date = date.today()
     game_time = datetime.combine(selected_date, time(23, 0), tzinfo=timezone.utc)

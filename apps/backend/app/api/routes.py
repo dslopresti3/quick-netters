@@ -224,7 +224,7 @@ def get_games(
     )
     logger.info("games scorer attachment start", extra={"selected_date": date.isoformat()})
     scorer_started = perf_counter()
-    games = providers.recommendation_service.attach_top_projected_scorers(date, games)
+    games = providers.recommendation_service.attach_top_projected_scorers(date, games, market=selected_market)
     scorer_elapsed_ms = round((perf_counter() - scorer_started) * 1000, 2)
     logger.info(
         "games scorer attachment end",
@@ -308,7 +308,7 @@ def get_game_recommendations(
     selected_market = resolve_market(market)
     ensure_date_not_more_than_one_day_ahead(date)
     _trigger_snapshot_capture(date, selected_market, providers)
-    games = providers.recommendation_service.attach_top_projected_scorers(date, providers.schedule_provider.fetch(date))
+    games = providers.recommendation_service.attach_top_projected_scorers(date, providers.schedule_provider.fetch(date), market=selected_market)
     games_by_id = {game.game_id: game for game in games}
 
     if game_id not in games_by_id:
