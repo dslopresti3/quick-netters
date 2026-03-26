@@ -19,6 +19,7 @@ export interface TeamProjectionLeader {
   player_id: string;
   player_name: string;
   player_team?: string;
+  team_name?: string;
   model_probability: number;
 }
 
@@ -41,6 +42,7 @@ export interface Recommendation {
   player_id: string;
   player_name: string;
   player_team?: string;
+  team_name?: string;
   model_probability: number;
   implied_probability?: number;
   fair_odds: number;

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { RecommendationCard } from "../../../components/recommendation-card";
+import type { Recommendation, TeamProjectionLeader } from "../../../lib/interfaces";
 import { fetchDateAvailability, fetchGameRecommendations, getCurrentUtcDate, resolveDisplayTimezone } from "../../../lib/api";
 
 type GameDetailPageProps = {
@@ -11,6 +12,44 @@ type GameDetailPageProps = {
     timezone?: string;
   };
 };
+
+function formatProjectedGoalTotal(modelProbability: number): string {
+  return modelProbability.toFixed(2);
+}
+
+function RecommendationSection({
+  title,
+  description,
+  picks,
+  emptyState,
+  featuredClassName,
+  ranked = false,
+}: {
+  title: string;
+  description: string;
+  picks: Recommendation[];
+  emptyState: string;
+  featuredClassName?: string;
+  ranked?: boolean;
+}) {
+  return (
+    <section className={`card stack-gap recommendation-panel${featuredClassName ? ` ${featuredClassName}` : ""}`}>
+      <h2>{title}</h2>
+      <p className="helper-text">{description}</p>
+      {picks.length === 0 ? (
+        <p className="empty-state">{emptyState}</p>
+      ) : picks.length === 1 ? (
+        <RecommendationCard recommendation={picks[0]} rank={ranked ? 1 : undefined} />
+      ) : (
+        <div className="recommendation-grid">
+          {picks.map((pick, index) => (
+            <RecommendationCard key={pick.player_id} recommendation={pick} rank={ranked ? index + 1 : undefined} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
 
 export default async function GameDetailPage({ params, searchParams }: GameDetailPageProps) {
   const selectedDate = searchParams?.date ?? getCurrentUtcDate();
@@ -68,6 +107,12 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
   const topPlays = gameResponse.top_plays ?? gameResponse.recommendations.slice(0, 3);
   const bestBet = gameResponse.best_bet;
   const underdogPlay = gameResponse.underdog_value_play;
+  const topProjectedScorers = [...gameResponse.recommendations]
+    .sort((a, b) => b.model_probability - a.model_probability)
+    .slice(0, 3);
+  const featuredProjectionRows: Array<Recommendation | TeamProjectionLeader> = topProjectedScorers.length > 0
+    ? topProjectedScorers
+    : [gameResponse.game.away_top_projected_scorer, gameResponse.game.home_top_projected_scorer].filter((leader): leader is TeamProjectionLeader => Boolean(leader));
 
   return (
     <main className="page stack-gap-lg">
@@ -100,61 +145,65 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
         </section>
       )}
 
-      <section className="card stack-gap">
-        <h2>Top projected first-goal scorers by team</h2>
-        <ul className="candidate-list">
-          <li>
-            <strong>{gameResponse.game.away_team}:</strong>{" "}
-            {gameResponse.game.away_top_projected_scorer
-              ? `${gameResponse.game.away_top_projected_scorer.player_name} (${(gameResponse.game.away_top_projected_scorer.model_probability * 100).toFixed(1)}%)`
-              : "Projection unavailable"}
-          </li>
-          <li>
-            <strong>{gameResponse.game.home_team}:</strong>{" "}
-            {gameResponse.game.home_top_projected_scorer
-              ? `${gameResponse.game.home_top_projected_scorer.player_name} (${(gameResponse.game.home_top_projected_scorer.model_probability * 100).toFixed(1)}%)`
-              : "Projection unavailable"}
-          </li>
-        </ul>
-      </section>
-
-      <section className="card stack-gap">
-        <h2>Top 3 plays for this game</h2>
-        <p className="helper-text">Best balanced plays using a blended probability + betting value ranking.</p>
-        {!availability.projections_available ? (
-          <p className="empty-state">This game is scheduled, but projections are not available yet.</p>
-        ) : !availability.odds_available ? (
-          <p className="empty-state">Projections are available, but market odds are not posted yet.</p>
-        ) : topPlays.length === 0 ? (
-          <p className="empty-state">No balanced Top 3 plays are qualified yet for this game.</p>
+      <section className="card stack-gap featured-scorer-summary">
+        <div className="featured-summary-header">
+          <h2>Featured projected scorers</h2>
+          <p className="helper-text">Quick read on the strongest model signals for this matchup.</p>
+        </div>
+        {featuredProjectionRows.length === 0 ? (
+          <p className="empty-state">Projection data is not available yet for this game.</p>
         ) : (
-          <div className="recommendation-grid">
-            {topPlays.map((pick, index) => (
-              <RecommendationCard key={pick.player_id} recommendation={pick} rank={index + 1} />
+          <ul className="featured-scorer-list">
+            {featuredProjectionRows.map((scorer, index) => (
+              <li key={scorer.player_id} className="featured-scorer-row">
+                <div>
+                  <p className="featured-scorer-rank">#{index + 1} Projected scorer</p>
+                  <p className="featured-scorer-name">{scorer.player_name}</p>
+                  <p className="helper-text">{scorer.player_team ?? `${gameResponse.game.away_team} / ${gameResponse.game.home_team}`}</p>
+                </div>
+                <div className="featured-scorer-metric">
+                  <span className="metric-label">Projected goals (model)</span>
+                  <strong>{formatProjectedGoalTotal(scorer.model_probability)}</strong>
+                </div>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
       </section>
 
-      <section className="card stack-gap featured-best-bet">
-        <h2>Best bet</h2>
-        <p className="helper-text">The single strongest overall play from the blended probability + value model.</p>
-        {!availability.projections_available ? (
+      {!availability.projections_available ? (
+        <section className="card stack-gap">
+          <h2>Recommendations</h2>
           <p className="empty-state">This game is scheduled, but projections are not available yet.</p>
-        ) : !availability.odds_available ? (
+        </section>
+      ) : !availability.odds_available ? (
+        <section className="card stack-gap">
+          <h2>Recommendations</h2>
           <p className="empty-state">Projections are available, but market odds are not posted yet.</p>
-        ) : !bestBet ? (
-          <p className="empty-state">No best bet is qualified for this game yet.</p>
-        ) : (
-          <RecommendationCard recommendation={bestBet} />
-        )}
-      </section>
-
-      {underdogPlay && (
-        <section className="card stack-gap featured-underdog">
-          <h2>Underdog value play</h2>
-          <p className="helper-text">A higher-risk, higher-payout option with positive EV and edge.</p>
-          <RecommendationCard recommendation={underdogPlay} />
+        </section>
+      ) : (
+        <section className="recommendation-hub stack-gap">
+          <RecommendationSection
+            title="Top 3 plays"
+            description="Best balanced plays using a blended probability + betting value ranking."
+            picks={topPlays}
+            emptyState="No balanced Top 3 plays are qualified yet for this game."
+            ranked
+          />
+          <RecommendationSection
+            title="Best bet"
+            description="The single strongest overall play from the blended probability + value model."
+            picks={bestBet ? [bestBet] : []}
+            emptyState="No best bet is qualified for this game yet."
+            featuredClassName="featured-best-bet"
+          />
+          <RecommendationSection
+            title="Underdog value play"
+            description="A higher-risk, higher-payout option with positive EV and edge."
+            picks={underdogPlay ? [underdogPlay] : []}
+            emptyState="No underdog value play is qualified for this game yet."
+            featuredClassName="featured-underdog"
+          />
         </section>
       )}
     </main>
