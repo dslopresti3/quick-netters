@@ -49,9 +49,9 @@ UNDERDOG_MAX_ODDS = 4000
 UNDERDOG_MIN_MODEL_PROBABILITY = 0.025
 
 ANYTIME_TOP_PLAY_MIN_ODDS = 100
-ANYTIME_TOP_PLAY_MAX_ODDS = 600
+ANYTIME_TOP_PLAY_MAX_ODDS = 900
 ANYTIME_UNDERDOG_MIN_ODDS = 250
-ANYTIME_UNDERDOG_MAX_ODDS = 600
+ANYTIME_UNDERDOG_MAX_ODDS = 1200
 
 
 class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
@@ -81,6 +81,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         game_recommendations = [
             recommendation for recommendation in self._build_ranked_recommendations(selected_date, market=market) if recommendation.game_id == game_id
         ]
+        _log_bucket_diagnostics(game_id=game_id, market=market, game_recommendations=game_recommendations)
         top_plays, best_bet = _select_top_play_bucket(game_recommendations, market=market)
         underdog = _select_underdog_bucket(game_recommendations, best_bet=best_bet, market=market)
         return top_plays, best_bet, underdog
@@ -792,6 +793,58 @@ def _select_underdog_bucket(
             if recommendation.player_id != best_bet.player_id:
                 return recommendation
     return scored[0][1]
+
+
+def _log_bucket_diagnostics(game_id: str, market: Market, game_recommendations: list[Recommendation]) -> None:
+    if not logger.isEnabledFor(logging.INFO):
+        return
+    if market != "anytime":
+        return
+
+    top_three_eligible = [recommendation for recommendation in game_recommendations if _top_three_eligible(recommendation, market=market)]
+    best_bet_eligible = [recommendation for recommendation in game_recommendations if _top_play_eligible(recommendation, market=market)]
+    underdog_eligible = [recommendation for recommendation in game_recommendations if _underdog_eligible(recommendation, market=market)]
+
+    top_min_odds, top_max_odds = _top_play_odds_bounds(market)
+    underdog_min_odds, underdog_max_odds = _underdog_odds_bounds(market)
+    best_bet_reject_reasons: dict[str, int] = defaultdict(int)
+    underdog_reject_reasons: dict[str, int] = defaultdict(int)
+
+    for recommendation in game_recommendations:
+        if recommendation.ev <= 0:
+            best_bet_reject_reasons["non_positive_ev"] += 1
+            underdog_reject_reasons["non_positive_ev"] += 1
+        if recommendation.edge <= 0:
+            best_bet_reject_reasons["non_positive_edge"] += 1
+            underdog_reject_reasons["non_positive_edge"] += 1
+        if recommendation.model_probability < TOP_PLAY_MIN_MODEL_PROBABILITY:
+            best_bet_reject_reasons["low_model_probability"] += 1
+        if recommendation.model_probability < UNDERDOG_MIN_MODEL_PROBABILITY:
+            underdog_reject_reasons["low_model_probability"] += 1
+        if recommendation.market_odds < top_min_odds:
+            best_bet_reject_reasons["odds_below_min"] += 1
+        if recommendation.market_odds > top_max_odds:
+            best_bet_reject_reasons["odds_above_max"] += 1
+        if recommendation.market_odds < underdog_min_odds:
+            underdog_reject_reasons["odds_below_min"] += 1
+        if recommendation.market_odds > underdog_max_odds:
+            underdog_reject_reasons["odds_above_max"] += 1
+
+    logger.info(
+        "anytime game bucket diagnostics",
+        extra={
+            "game_id": game_id,
+            "market": market,
+            "candidate_count": len(game_recommendations),
+            "top_three_eligible_count": len(top_three_eligible),
+            "best_bet_eligible_count": len(best_bet_eligible),
+            "underdog_eligible_count": len(underdog_eligible),
+            "best_bet_rejection_counts": dict(best_bet_reject_reasons),
+            "underdog_rejection_counts": dict(underdog_reject_reasons),
+            "top_play_odds_bounds": (top_min_odds, top_max_odds),
+            "underdog_odds_bounds": (underdog_min_odds, underdog_max_odds),
+        },
+    )
 
 
 def _confidence_tag(ev: float, confidence_score: float) -> str:
