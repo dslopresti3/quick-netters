@@ -35,6 +35,10 @@ function MetricLabel({ label, tooltip }: MetricLabelProps) {
 export function RecommendationCard({ recommendation, rank, market = "first_goal" }: RecommendationCardProps) {
   const marketName = marketLabel(market);
   const seasonProductionLabels = marketSeasonProductionLabels(market);
+  const seasonProductionValues = {
+    left: recommendation.goals_this_year ?? "-",
+    right: recommendation.first_goals_this_year ?? "-",
+  };
 
   return (
     <article className="recommendation-card stack-gap-sm">
@@ -107,11 +111,11 @@ export function RecommendationCard({ recommendation, rank, market = "first_goal"
         <div className="supporting-metrics-grid">
           <div className="supporting-metric">
             <span className="metric-label">{seasonProductionLabels.left}</span>
-            <strong>{recommendation.goals_this_year ?? "-"}</strong>
+            <strong>{seasonProductionValues.left}</strong>
           </div>
           <div className="supporting-metric">
             <span className="metric-label">{seasonProductionLabels.right}</span>
-            <strong>{recommendation.first_goals_this_year ?? "-"}</strong>
+            <strong>{seasonProductionValues.right}</strong>
           </div>
         </div>
       </section>
