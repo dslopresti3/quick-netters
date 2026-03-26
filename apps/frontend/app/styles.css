@@ -200,7 +200,33 @@ h1, h2, h3 { margin: 0; }
 
 .recommendation-hub {
   display: grid;
-  gap: 1.2rem;
+  gap: 0.9rem;
+}
+
+.featured-recommendations-grid {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.game-detail-page {
+  padding-top: 1.5rem;
+  padding-bottom: 2.25rem;
+}
+
+.game-detail-page .stack-gap > * + * {
+  margin-top: 0.8rem;
+}
+
+.game-detail-page .stack-gap-lg > * + * {
+  margin-top: 1rem;
+}
+
+.game-detail-page .card {
+  padding: 0.95rem;
+}
+
+.game-detail-page .featured-scorer-summary {
+  padding: 0.8rem 0.9rem;
 }
 
 .recommendation-card-header {
@@ -377,6 +403,12 @@ h1, h2, h3 { margin: 0; }
 
   .recommendation-card {
     padding: 0.8rem;
+  }
+}
+
+@media (min-width: 760px) {
+  .featured-recommendations-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
