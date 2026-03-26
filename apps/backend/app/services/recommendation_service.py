@@ -48,6 +48,11 @@ UNDERDOG_MIN_ODDS = 1800
 UNDERDOG_MAX_ODDS = 4000
 UNDERDOG_MIN_MODEL_PROBABILITY = 0.025
 
+ANYTIME_TOP_PLAY_MIN_ODDS = 100
+ANYTIME_TOP_PLAY_MAX_ODDS = 600
+ANYTIME_UNDERDOG_MIN_ODDS = 250
+ANYTIME_UNDERDOG_MAX_ODDS = 600
+
 
 class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
     """Build value recommendations by comparing model probabilities against market odds."""
@@ -76,8 +81,8 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         game_recommendations = [
             recommendation for recommendation in self._build_ranked_recommendations(selected_date, market=market) if recommendation.game_id == game_id
         ]
-        top_plays, best_bet = _select_top_play_bucket(game_recommendations)
-        underdog = _select_underdog_bucket(game_recommendations, best_bet=best_bet)
+        top_plays, best_bet = _select_top_play_bucket(game_recommendations, market=market)
+        underdog = _select_underdog_bucket(game_recommendations, best_bet=best_bet, market=market)
         return top_plays, best_bet, underdog
 
     def projections_available(self, selected_date: date, market: Market = "first_goal") -> bool:
@@ -94,8 +99,8 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         mapped_rows = self._map_odds_rows(selected_date, scheduled_games, projections, snapshots)
         return any(_is_valid_matched_odds_row(row) for row in mapped_rows)
 
-    def attach_top_projected_scorers(self, selected_date: date, games: list[GameSummary]) -> list[GameSummary]:
-        top_by_game_team, _ = self._build_top_projection_lookup(selected_date, games)
+    def attach_top_projected_scorers(self, selected_date: date, games: list[GameSummary], market: Market = "first_goal") -> list[GameSummary]:
+        top_by_game_team, _ = self._build_top_projection_lookup(selected_date, games, market=market)
 
         enriched_games: list[GameSummary] = []
         for game in games:
@@ -104,19 +109,21 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
             home_pick = top_by_game_team.get((game.game_id, game.home_team))
 
             if away_pick:
+                away_probability = _market_probability_for_projection(projection=away_pick, market=market)
                 enriched.away_top_projected_scorer = TeamProjectionLeader(
                     team=away_pick.projected_team_name,
                     player_id=away_pick.nhl_player_id,
                     player_name=away_pick.player_name,
-                    model_probability=round(away_pick.model_probability, 4),
+                    model_probability=round(away_probability if away_probability is not None else away_pick.model_probability, 4),
                 )
 
             if home_pick:
+                home_probability = _market_probability_for_projection(projection=home_pick, market=market)
                 enriched.home_top_projected_scorer = TeamProjectionLeader(
                     team=home_pick.projected_team_name,
                     player_id=home_pick.nhl_player_id,
                     player_name=home_pick.player_name,
-                    model_probability=round(home_pick.model_probability, 4),
+                    model_probability=round(home_probability if home_probability is not None else home_pick.model_probability, 4),
                 )
 
             enriched_games.append(enriched)
@@ -127,6 +134,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         self,
         selected_date: date,
         games: list[GameSummary] | None,
+        market: Market = "first_goal",
     ) -> tuple[dict[tuple[str, str], PlayerProjectionCandidate], bool]:
         projection_rows = self._eligible_projection_candidates(selected_date, games)
         valid_game_ids: set[str] | None = None
@@ -143,10 +151,11 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         seen_projection_keys: set[tuple[str, str]] = set()
 
         for projection in projection_rows:
-            if projection.model_probability <= 0 or projection.model_probability >= 1:
+            projection_market_probability = _market_probability_for_projection(projection=projection, market=market)
+            if projection_market_probability is None or projection_market_probability <= 0 or projection_market_probability >= 1:
                 logger.warning(
                     "Skipping projection row with invalid probability",
-                    extra={"selected_date": selected_date.isoformat(), "value": projection.model_probability},
+                    extra={"selected_date": selected_date.isoformat(), "value": projection_market_probability, "market": market},
                 )
                 continue
 
@@ -191,11 +200,14 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
                 player_name=projection.player_name.strip(),
                 projected_team_name=resolved_team_name,
                 model_probability=projection.model_probability,
+                first_goal_probability=projection.first_goal_probability,
+                anytime_probability=projection.anytime_probability,
                 historical_production=projection.historical_production,
                 roster_eligibility=projection.roster_eligibility,
             )
             existing = top_by_game_team.get(projection_key)
-            if existing is None or projection.model_probability > existing.model_probability:
+            existing_market_probability = _market_probability_for_projection(projection=existing, market=market) if existing is not None else None
+            if existing is None or existing_market_probability is None or projection_market_probability > existing_market_probability:
                 top_by_game_team[projection_key] = normalized_projection
 
         return top_by_game_team, attached_projection_count > 0
@@ -232,6 +244,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
             confidence_score = _confidence_score(
                 projection=projection,
                 market_odds=odds_snapshot.market_odds_american,
+                market_probability=market_probability,
             )
 
             recommendations.append(
@@ -277,7 +290,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
             grouped_by_game[recommendation.game_id].append(recommendation)
 
         for game_recommendations in grouped_by_game.values():
-            _attach_play_scores(game_recommendations)
+            _attach_play_scores(game_recommendations, market=market)
 
         return sorted(
             recommendations,
@@ -641,37 +654,43 @@ def _min_max_normalize(value: float, min_value: float, max_value: float) -> floa
     return (value - min_value) / (max_value - min_value)
 
 
-def _top_play_eligible(recommendation: Recommendation) -> bool:
+def _top_play_eligible(recommendation: Recommendation, market: Market = "first_goal") -> bool:
+    min_odds, max_odds = _top_play_odds_bounds(market)
     return (
         recommendation.ev > 0
         and recommendation.edge > 0
         and recommendation.model_probability >= TOP_PLAY_MIN_MODEL_PROBABILITY
-        and recommendation.market_odds >= TOP_PLAY_MIN_ODDS
-        and recommendation.market_odds <= TOP_PLAY_MAX_ODDS
+        and recommendation.market_odds >= min_odds
+        and recommendation.market_odds <= max_odds
     )
 
 
-def _top_three_eligible(recommendation: Recommendation) -> bool:
+def _top_three_eligible(recommendation: Recommendation, market: Market = "first_goal") -> bool:
+    min_odds, max_odds = _top_play_odds_bounds(market)
+    within_market_range = recommendation.market_odds <= max_odds
+    if market == "anytime":
+        within_market_range = recommendation.market_odds >= min_odds and recommendation.market_odds <= max_odds
     return (
         recommendation.model_probability >= TOP_THREE_MIN_MODEL_PROBABILITY
         and recommendation.ev >= TOP_THREE_MIN_EV
         and recommendation.edge >= TOP_THREE_MIN_EDGE
-        and recommendation.market_odds <= TOP_PLAY_MAX_ODDS
+        and within_market_range
     )
 
 
-def _underdog_eligible(recommendation: Recommendation) -> bool:
+def _underdog_eligible(recommendation: Recommendation, market: Market = "first_goal") -> bool:
+    min_odds, max_odds = _underdog_odds_bounds(market)
     return (
         recommendation.ev > 0
         and recommendation.edge > 0
         and recommendation.model_probability >= UNDERDOG_MIN_MODEL_PROBABILITY
-        and recommendation.market_odds >= UNDERDOG_MIN_ODDS
-        and recommendation.market_odds <= UNDERDOG_MAX_ODDS
+        and recommendation.market_odds >= min_odds
+        and recommendation.market_odds <= max_odds
     )
 
 
-def _attach_play_scores(game_recommendations: list[Recommendation]) -> None:
-    eligible_top_plays = [recommendation for recommendation in game_recommendations if _top_three_eligible(recommendation)]
+def _attach_play_scores(game_recommendations: list[Recommendation], market: Market = "first_goal") -> None:
+    eligible_top_plays = [recommendation for recommendation in game_recommendations if _top_three_eligible(recommendation, market=market)]
     if not eligible_top_plays:
         for recommendation in game_recommendations:
             recommendation.recommendation_score = 0.0
@@ -695,8 +714,8 @@ def _attach_play_scores(game_recommendations: list[Recommendation]) -> None:
         recommendation.recommendation_score = round(play_score, 4)
 
 
-def _select_top_play_bucket(game_recommendations: list[Recommendation]) -> tuple[list[Recommendation], Recommendation | None]:
-    eligible_top_plays = [recommendation for recommendation in game_recommendations if _top_three_eligible(recommendation)]
+def _select_top_play_bucket(game_recommendations: list[Recommendation], market: Market = "first_goal") -> tuple[list[Recommendation], Recommendation | None]:
+    eligible_top_plays = [recommendation for recommendation in game_recommendations if _top_three_eligible(recommendation, market=market)]
     sorted_top_plays = sorted(
         eligible_top_plays,
         key=lambda recommendation: (
@@ -725,13 +744,17 @@ def _select_top_play_bucket(game_recommendations: list[Recommendation]) -> tuple
             if len(top_plays) == 3:
                 break
 
-    strict_top_plays = [recommendation for recommendation in sorted_top_plays if _top_play_eligible(recommendation)]
+    strict_top_plays = [recommendation for recommendation in sorted_top_plays if _top_play_eligible(recommendation, market=market)]
     best_bet = strict_top_plays[0] if strict_top_plays else None
     return top_plays, best_bet
 
 
-def _select_underdog_bucket(game_recommendations: list[Recommendation], best_bet: Recommendation | None) -> Recommendation | None:
-    underdogs = [recommendation for recommendation in game_recommendations if _underdog_eligible(recommendation)]
+def _select_underdog_bucket(
+    game_recommendations: list[Recommendation],
+    best_bet: Recommendation | None,
+    market: Market = "first_goal",
+) -> Recommendation | None:
+    underdogs = [recommendation for recommendation in game_recommendations if _underdog_eligible(recommendation, market=market)]
     if not underdogs:
         return None
 
@@ -795,7 +818,7 @@ def _recommendation_score(probability: float, edge: float, ev: float, market_odd
     return round(100 * combined, 4)
 
 
-def _confidence_score(projection: PlayerProjectionCandidate, market_odds: int) -> float:
+def _confidence_score(projection: PlayerProjectionCandidate, market_odds: int, market_probability: float) -> float:
     history = projection.historical_production
     games_played = max(0.0, float(history.season_games_played or 0.0))
     shots_per_game = (float(history.season_total_shots or 0.0) / games_played) if games_played > 0 else 0.0
@@ -805,13 +828,13 @@ def _confidence_score(projection: PlayerProjectionCandidate, market_odds: int) -
 
     sample_score = _bounded_scale(games_played, floor=8.0, ceiling=65.0)
     process_score = _bounded_scale(shots_per_game, floor=0.8, ceiling=4.0)
-    role_score = _bounded_scale(projection.model_probability, floor=0.01, ceiling=0.16)
+    role_score = _bounded_scale(market_probability, floor=0.01, ceiling=0.25)
 
     recent_spike = max(0.0, recent_5_first_goal_rate - first_goal_rate) + max(0.0, recent_10_first_goal_rate - first_goal_rate)
     recency_penalty = _bounded_scale(recent_spike, floor=0.0, ceiling=0.45)
 
     extreme_longshot_penalty = 0.0
-    if market_odds >= 900 and projection.model_probability < 0.03:
+    if market_odds >= 900 and market_probability < 0.03:
         extreme_longshot_penalty = _bounded_scale(float(market_odds), floor=900.0, ceiling=2500.0)
 
     confidence = (
@@ -916,3 +939,15 @@ def _is_valid_matched_odds_row(row: NormalizedPlayerOdds) -> bool:
     if row.player_mapping.match_status != "matched":
         return False
     return True
+
+
+def _top_play_odds_bounds(market: Market) -> tuple[int, int]:
+    if market == "anytime":
+        return ANYTIME_TOP_PLAY_MIN_ODDS, ANYTIME_TOP_PLAY_MAX_ODDS
+    return TOP_PLAY_MIN_ODDS, TOP_PLAY_MAX_ODDS
+
+
+def _underdog_odds_bounds(market: Market) -> tuple[int, int]:
+    if market == "anytime":
+        return ANYTIME_UNDERDOG_MIN_ODDS, ANYTIME_UNDERDOG_MAX_ODDS
+    return UNDERDOG_MIN_ODDS, UNDERDOG_MAX_ODDS

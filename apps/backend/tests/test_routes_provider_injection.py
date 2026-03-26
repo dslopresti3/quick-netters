@@ -197,6 +197,15 @@ def test_daily_recommendations_route_supports_anytime_market() -> None:
     assert payload.recommendations[0].model_probability == 0.65
 
 
+def test_games_route_supports_anytime_top_projected_scorer_probability() -> None:
+    selected_date = date.today()
+
+    payload = get_games(date=selected_date, market="anytime", providers=_provider_registry())
+
+    assert payload.games[0].home_top_projected_scorer is not None
+    assert payload.games[0].home_top_projected_scorer.model_probability == 0.65
+
+
 def test_anytime_market_derives_probability_when_anytime_projection_missing() -> None:
     class _FirstGoalOnlyProjectionProvider(ProjectionProvider):
         def fetch_player_first_goal_projections(self, selected_date: date) -> list[PlayerProjectionCandidate]:
