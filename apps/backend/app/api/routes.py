@@ -12,6 +12,7 @@ from app.api.schemas import (
     GameRecommendationsResponse,
     GameSummary,
     GamesResponse,
+    HistoricalDateAvailabilityResponse,
     LockedRecommendationSnapshot,
     RecommendationHistoryResponse,
 )
@@ -343,9 +344,6 @@ def get_recommendation_history(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Recommendation history service unavailable")
 
     selected_market = resolve_market(market) if market is not None else None
-    if date is not None and selected_market is not None:
-        history_service.ensure_snapshot(date, selected_market)
-
     snapshots = [LockedRecommendationSnapshot.model_validate(item) for item in history_service.list_snapshots(date, selected_market)]
 
     if date is None or selected_market is None:
@@ -368,6 +366,35 @@ def get_recommendation_history(
         earliest_game_time_et=earliest_game_time_et,
         lock_cutoff_et=lock_cutoff_et,
         snapshots=snapshots,
+    )
+
+
+@router.get("/recommendations/history/availability", response_model=HistoricalDateAvailabilityResponse)
+def get_recommendation_history_availability(
+    date: date | None = Query(default=None, description="Optional UTC date to check"),
+    market: str | None = Query(default=None, description="Recommendation market: first_goal or anytime"),
+    providers: ProviderRegistry = Depends(get_provider_registry),
+) -> HistoricalDateAvailabilityResponse:
+    history_service = getattr(providers, "recommendation_history_service", None)
+    if history_service is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Recommendation history service unavailable")
+
+    selected_market = resolve_market(market) if market is not None else None
+    available_dates = history_service.list_snapshot_dates(market=selected_market)
+    has_snapshot = False
+    if date is not None:
+        if selected_market is None:
+            has_snapshot = len(history_service.list_snapshots(selected_date=date)) > 0
+        else:
+            has_snapshot = history_service.get_snapshot(date, selected_market) is not None
+
+    return HistoricalDateAvailabilityResponse(
+        selected_date=date,
+        market=selected_market,
+        available_dates=available_dates,
+        min_available_date=min(available_dates) if available_dates else None,
+        max_available_date=max(available_dates) if available_dates else None,
+        has_snapshot=has_snapshot,
     )
 
 
