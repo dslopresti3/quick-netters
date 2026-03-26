@@ -31,6 +31,8 @@ class PlayerFirstGoalProjectionRow:
     is_active_roster: bool
     historical_production: PlayerHistoricalProduction
     model_probability: float
+    first_goal_probability: float | None = None
+    anytime_probability: float | None = None
 
 
 class ProjectionStoreValidationError(ValueError):
@@ -87,6 +89,8 @@ class StoreBackedProjectionProvider(ProjectionProvider):
                     active_team_name=row.active_team_name,
                     is_active_roster=row.is_active_roster,
                 ),
+                first_goal_probability=row.first_goal_probability,
+                anytime_probability=row.anytime_probability,
             )
             for row in rows
         ]
@@ -177,9 +181,12 @@ def _parse_projection_row(raw_row: dict[str, Any], idx: int) -> PlayerFirstGoalP
         raw_row.get("season_total_goals"),
         raw_row.get("goals_this_year"),
     )
-    probability_raw = raw_row.get("model_probability")
+    probability_raw = raw_row.get("first_goal_model_probability")
+    if probability_raw is None:
+        probability_raw = raw_row.get("model_probability")
     if probability_raw is None:
         probability_raw = raw_row.get("probability")
+    anytime_probability_raw = raw_row.get("anytime_model_probability")
 
     if not isinstance(projection_date_raw, str):
         raise ProjectionStoreValidationError(f"Projection row at index {idx} has an invalid or missing 'date'.")
@@ -252,6 +259,16 @@ def _parse_projection_row(raw_row: dict[str, Any], idx: int) -> PlayerFirstGoalP
             )
         season_total_goals = float(season_total_goals_raw)
 
+    anytime_probability: float | None = None
+    if anytime_probability_raw is not None:
+        if not isinstance(anytime_probability_raw, (int, float)):
+            raise ProjectionStoreValidationError(f"Projection row at index {idx} has a non-numeric 'anytime_model_probability'.")
+        anytime_probability = float(anytime_probability_raw)
+        if anytime_probability <= 0 or anytime_probability >= 1:
+            raise ProjectionStoreValidationError(
+                f"Projection row at index {idx} has an invalid 'anytime_model_probability' ({anytime_probability}); expected 0 < p < 1."
+            )
+
     return PlayerFirstGoalProjectionRow(
         projection_date=projection_date,
         game_id=game_id_raw.strip(),
@@ -266,6 +283,8 @@ def _parse_projection_row(raw_row: dict[str, Any], idx: int) -> PlayerFirstGoalP
             season_total_goals=season_total_goals,
         ),
         model_probability=probability,
+        first_goal_probability=probability,
+        anytime_probability=anytime_probability,
     )
 
 
@@ -317,3 +336,12 @@ def _resolve_nhl_player_id_from_roster(player_name: str, team_name: str) -> str 
             if mapped is not None:
                 return mapped
     return None
+    anytime_probability: float | None = None
+    if anytime_probability_raw is not None:
+        if not isinstance(anytime_probability_raw, (int, float)):
+            raise ProjectionStoreValidationError(f"Projection row at index {idx} has a non-numeric 'anytime_model_probability'.")
+        anytime_probability = float(anytime_probability_raw)
+        if anytime_probability <= 0 or anytime_probability >= 1:
+            raise ProjectionStoreValidationError(
+                f"Projection row at index {idx} has an invalid 'anytime_model_probability' ({anytime_probability}); expected 0 < p < 1."
+            )

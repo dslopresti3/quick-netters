@@ -111,6 +111,32 @@ def test_store_reads_season_totals_from_alias_fields(tmp_path) -> None:
     assert rows[0].historical_production.season_first_goals == 8.0
 
 
+def test_store_reads_distinct_first_goal_and_anytime_probabilities(tmp_path) -> None:
+    artifact = tmp_path / "projections.json"
+    _write_artifact(
+        artifact,
+        [
+            {
+                "date": "2026-03-23",
+                "game_id": "g-1",
+                "nhl_player_id": "8477939",
+                "player_name": "Auston Matthews",
+                "team": "Toronto Maple Leafs",
+                "first_goal_model_probability": 0.09,
+                "anytime_model_probability": 0.52,
+            },
+        ],
+    )
+
+    provider = StoreBackedProjectionProvider(store=JsonArtifactProjectionStore(artifact))
+    rows = provider.fetch_player_first_goal_projections(date(2026, 3, 23))
+
+    assert len(rows) == 1
+    assert rows[0].first_goal_probability == 0.09
+    assert rows[0].anytime_probability == 0.52
+    assert rows[0].model_probability == 0.09
+
+
 @pytest.mark.parametrize(
     ("row", "error_fragment"),
     [

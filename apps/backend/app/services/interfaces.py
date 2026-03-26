@@ -43,6 +43,13 @@ class PlayerProjectionCandidate:
     model_probability: float
     historical_production: PlayerHistoricalProduction
     roster_eligibility: PlayerRosterEligibility
+    first_goal_probability: float | None = None
+    anytime_probability: float | None = None
+
+    def probability_for_market(self, market: Market) -> float | None:
+        if market == "anytime":
+            return self.anytime_probability
+        return self.first_goal_probability if self.first_goal_probability is not None else self.model_probability
 
 
 class ScheduleProvider(ABC):

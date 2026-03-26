@@ -45,6 +45,8 @@ class StubProjectionProvider(ProjectionProvider):
                 model_probability=0.3,
                 historical_production=PlayerHistoricalProduction(),
                 roster_eligibility=PlayerRosterEligibility(active_team_name="Custom Home", is_active_roster=True),
+                first_goal_probability=0.3,
+                anytime_probability=0.65,
             ),
         ]
 
@@ -171,6 +173,7 @@ def test_daily_recommendations_route_uses_injected_recommendation_dependencies()
     assert payload.recommendations[0].team_name == "Custom Home"
     assert payload.recommendations[0].implied_probability is not None
     assert payload.recommendations[0].decimal_odds == 13.0
+    assert payload.recommendations[0].model_probability == 0.3
 
 
 def test_game_recommendations_route_uses_injected_registry() -> None:
@@ -191,6 +194,44 @@ def test_daily_recommendations_route_supports_anytime_market() -> None:
 
     assert payload.odds_available is True
     assert payload.recommendations[0].player_id == "p-custom"
+    assert payload.recommendations[0].model_probability == 0.65
+
+
+def test_anytime_market_derives_probability_when_anytime_projection_missing() -> None:
+    class _FirstGoalOnlyProjectionProvider(ProjectionProvider):
+        def fetch_player_first_goal_projections(self, selected_date: date) -> list[PlayerProjectionCandidate]:
+            return [
+                PlayerProjectionCandidate(
+                    game_id="g-custom-vs-test",
+                    nhl_player_id="p-custom",
+                    player_name="Injected Player",
+                    projected_team_name="Custom Home",
+                    model_probability=0.04,
+                    historical_production=PlayerHistoricalProduction(
+                        season_total_goals=30,
+                        season_games_played=60,
+                    ),
+                    roster_eligibility=PlayerRosterEligibility(active_team_name="Custom Home", is_active_roster=True),
+                    first_goal_probability=0.04,
+                    anytime_probability=None,
+                )
+            ]
+
+    selected_date = date.today()
+    schedule_provider = StubScheduleProvider()
+    projection_provider = _FirstGoalOnlyProjectionProvider()
+    odds_provider = StubOddsProvider()
+    providers = _registry_with(
+        schedule_provider=schedule_provider,
+        projection_provider=projection_provider,
+        odds_provider=odds_provider,
+    )
+
+    payload = get_daily_recommendations(date=selected_date, market="anytime", providers=providers)
+
+    assert payload.recommendations
+    assert payload.recommendations[0].model_probability != 0.04
+    assert payload.recommendations[0].model_probability > 0.3
 
 
 class _StubRawOddsClient:

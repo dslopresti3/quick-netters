@@ -18,6 +18,7 @@ from app.services.interfaces import (
     ScheduleProvider,
 )
 from app.services.markets import Market
+from app.services.probabilities import estimate_anytime_goal_probability
 from app.services.odds import (
     NormalizedPlayerOdds,
     OddsEventMapping,
@@ -213,19 +214,20 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
         for (game_id, player_id), projection in projections_by_game_player.items():
             game = games_by_id.get(game_id)
             odds_snapshot = _latest_snapshot_for_player(odds_snapshots, game_id, player_id)
+            market_probability = _market_probability_for_projection(projection=projection, market=market)
 
-            if game is None or odds_snapshot is None or not _is_valid_matched_odds_row(odds_snapshot):
+            if game is None or odds_snapshot is None or not _is_valid_matched_odds_row(odds_snapshot) or market_probability is None:
                 continue
 
             implied_probability = american_to_implied_probability(odds_snapshot.market_odds_american)
             decimal_odds = _american_to_decimal_odds(odds_snapshot.market_odds_american)
-            fair_odds = fair_american_odds(projection.model_probability)
-            ev = expected_value_per_unit(projection.model_probability, odds_snapshot.market_odds_american)
+            fair_odds = fair_american_odds(market_probability)
+            ev = expected_value_per_unit(market_probability, odds_snapshot.market_odds_american)
 
             if implied_probability is None or decimal_odds is None or fair_odds is None or ev is None:
                 continue
 
-            edge = projection.model_probability - implied_probability
+            edge = market_probability - implied_probability
 
             confidence_score = _confidence_score(
                 projection=projection,
@@ -242,7 +244,7 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
                     player_name=projection.player_name,
                     player_team=projection.projected_team_name,
                     team_name=projection.projected_team_name,
-                    model_probability=round(projection.model_probability, 4),
+                    model_probability=round(market_probability, 4),
                     fair_odds=fair_odds,
                     market_odds=odds_snapshot.market_odds_american,
                     decimal_odds=round(decimal_odds, 4),
@@ -481,6 +483,15 @@ def _match_event_to_game(
         match_confidence=round(confidence, 4),
         matched_at=matched_at,
     )
+
+
+def _market_probability_for_projection(projection: PlayerProjectionCandidate, market: Market) -> float | None:
+    market_probability = projection.probability_for_market(market)
+    if market_probability is not None:
+        return market_probability
+    if market == "anytime":
+        return estimate_anytime_goal_probability(projection.historical_production)
+    return None
 
 
 def _match_player_to_projection(

@@ -24,6 +24,7 @@ from app.services.interfaces import (
     ProjectionProvider,
     ScheduleProvider,
 )
+from app.services.probabilities import estimate_anytime_goal_probability
 
 logger = logging.getLogger(__name__)
 
@@ -605,7 +606,8 @@ def _generate_candidates_from_eligible_player_pool(
         team_feature_values = team_feature_by_game_team.get(rank_key, (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
         for candidate, player_historical, player_score, player_features in scored_sorted:
             player_share_within_team = player_score / max(total_player_score, 1e-9)
-            probability = team_probability * player_share_within_team
+            first_goal_probability = team_probability * player_share_within_team
+            anytime_probability = estimate_anytime_goal_probability(player_historical)
             debug_rows.append(
                 {
                     "player_name": candidate.player.player_name,
@@ -632,7 +634,8 @@ def _generate_candidates_from_eligible_player_pool(
                     "player_score_before_normalization": round(player_score, 6),
                     "team_probability": round(team_probability, 6),
                     "player_share_given_team_first": round(player_share_within_team, 6),
-                    "final_probability_after_normalization": round(probability, 6),
+                    "final_probability_after_normalization": round(first_goal_probability, 6),
+                    "anytime_probability": round(anytime_probability, 6) if anytime_probability is not None else None,
                 }
             )
             rows.append(
@@ -641,13 +644,15 @@ def _generate_candidates_from_eligible_player_pool(
                     nhl_player_id=candidate.player.player_id,
                     player_name=candidate.player.player_name,
                     projected_team_name=candidate.projected_team_name,
-                    model_probability=round(probability, 4),
+                    model_probability=round(first_goal_probability, 4),
                     historical_production=player_historical,
                     roster_eligibility=PlayerRosterEligibility(
                         active_team_name=candidate.player.active_team_name,
                         is_active_roster=candidate.player.is_active_roster,
                         position_code=candidate.player.position_code,
                     ),
+                    first_goal_probability=round(first_goal_probability, 4),
+                    anytime_probability=round(anytime_probability, 4) if anytime_probability is not None else None,
                 )
             )
         if debug_game_id and not debug_logged and rank_key[0] == debug_game_id:
@@ -684,6 +689,14 @@ def _generate_placeholder_candidates(scheduled_games: list[GameSummary]) -> list
                             season_total_shots=float(100 + (20 * index)),
                         ),
                         roster_eligibility=PlayerRosterEligibility(active_team_name=team_name, is_active_roster=True, position_code="F"),
+                        first_goal_probability=probability,
+                        anytime_probability=estimate_anytime_goal_probability(
+                            PlayerHistoricalProduction(
+                                season_games_played=float(60 + index),
+                                season_total_goals=float(12 + (2 * index)),
+                                season_total_shots=float(100 + (20 * index)),
+                            )
+                        ),
                     )
                 )
     return rows
@@ -759,6 +772,8 @@ def _as_serializable_rows(selected_date: date, rows: list[PlayerProjectionCandid
                 "historical_recent_10_first_period_shots": row.historical_production.recent_10_first_period_shots,
                 "probability": row.model_probability,
                 "model_probability": row.model_probability,
+                "first_goal_model_probability": row.first_goal_probability,
+                "anytime_model_probability": row.anytime_probability,
             }
         )
     return serialized
@@ -1400,7 +1415,8 @@ def _load_projection_rows_for_date_from_artifact(path: Path, selected_date: date
         player_name_raw = row.get("player_name")
         team_name_raw = row.get("team_name")
         active_team_name_raw = row.get("active_team_name", team_name_raw)
-        probability_raw = row.get("model_probability", row.get("probability"))
+        first_goal_probability_raw = row.get("first_goal_model_probability", row.get("model_probability", row.get("probability")))
+        anytime_probability_raw = row.get("anytime_model_probability")
         position_code = _normalize_position_code(row.get("position_code"))
         if not isinstance(game_id_raw, str) or not game_id_raw.strip():
             continue
@@ -1410,15 +1426,20 @@ def _load_projection_rows_for_date_from_artifact(path: Path, selected_date: date
             continue
         if not isinstance(active_team_name_raw, str) or not active_team_name_raw.strip():
             continue
-        if not isinstance(probability_raw, (int, float)):
+        if not isinstance(first_goal_probability_raw, (int, float)):
             continue
         if position_code is None:
             continue
         if _is_goalie(position_code):
             continue
-        probability = float(probability_raw)
+        probability = float(first_goal_probability_raw)
         if not (0 < probability < 1):
             continue
+        anytime_probability: float | None = None
+        if isinstance(anytime_probability_raw, (int, float)):
+            parsed_anytime_probability = float(anytime_probability_raw)
+            if 0 < parsed_anytime_probability < 1:
+                anytime_probability = parsed_anytime_probability
         rows.append(
             PlayerProjectionCandidate(
                 game_id=game_id_raw.strip(),
@@ -1455,6 +1476,8 @@ def _load_projection_rows_for_date_from_artifact(path: Path, selected_date: date
                     is_active_roster=bool(row.get("is_active_roster", True)),
                     position_code=position_code,
                 ),
+                first_goal_probability=probability,
+                anytime_probability=anytime_probability,
             )
         )
     return rows
