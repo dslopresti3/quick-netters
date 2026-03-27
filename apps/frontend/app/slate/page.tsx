@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { DatePickerForm } from "../../components/date-picker-form";
-import { MarketToggle } from "../../components/market-toggle";
+import { AppShellHeader } from "../../components/app-shell-header";
+import { PageHeader } from "../../components/page-header";
 import { RecommendationCard } from "../../components/recommendation-card";
 import { fetchDailyRecommendationsByDate, fetchDateAvailability, fetchGamesByDate, getCurrentUtcDate, resolveDisplayTimezone } from "../../lib/api";
 import { marketLabel, resolveMarket } from "../../lib/market";
@@ -22,8 +23,19 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
 
   if (!availability.valid_by_product_rule) {
     return (
-      <main className="page">
-        <h1>Daily Slate</h1>
+      <main className="page stack-gap-lg">
+        <AppShellHeader
+          activeNav="slate"
+          selectedDate={selectedDate}
+          displayTimezone={displayTimezone}
+          selectedMarket={selectedMarket}
+          marketPath="/slate"
+        />
+        <PageHeader
+          title="Daily Slate"
+          description="Track today’s board and quickly pivot by market or date."
+          contextChips={[`Market · ${marketTitle}`, `Date · ${selectedDate}`]}
+        />
         <section className="card stack-gap">
           <h2>Invalid date</h2>
           <ul className="candidate-list">
@@ -48,10 +60,18 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
   if (!availability.schedule_available) {
     return (
       <main className="page stack-gap-lg">
-        <header>
-          <h1>Daily Slate</h1>
-          <p className="subtitle">{selectedDate} · Scheduled games and value picks</p>
-        </header>
+        <AppShellHeader
+          activeNav="slate"
+          selectedDate={selectedDate}
+          displayTimezone={displayTimezone}
+          selectedMarket={selectedMarket}
+          marketPath="/slate"
+        />
+        <PageHeader
+          title="Daily Slate"
+          description="Scheduled games and value picks for the selected board."
+          contextChips={[`Market · ${marketTitle}`, `Date · ${selectedDate}`]}
+        />
 
         <section className="card stack-gap">
           <h2>Change date</h2>
@@ -83,12 +103,24 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
 
   return (
     <main className="page stack-gap-lg">
-      <header>
-        <h1>Daily Slate</h1>
-        <p className="subtitle">Date: {selectedDate} · Market: {marketTitle}</p>
-        <MarketToggle selectedDate={selectedDate} displayTimezone={displayTimezone} selectedMarket={selectedMarket} path="/slate" />
-        <Link href={`/history?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">View historical picks</Link>
-      </header>
+      <AppShellHeader
+        activeNav="slate"
+        selectedDate={selectedDate}
+        displayTimezone={displayTimezone}
+        selectedMarket={selectedMarket}
+        marketPath="/slate"
+        utilityLinks={[
+          {
+            href: `/history?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`,
+            label: "History",
+          },
+        ]}
+      />
+      <PageHeader
+        title="Daily Slate"
+        description="Live slate intelligence with top model-driven value opportunities."
+        contextChips={[`Market · ${marketTitle}`, `Date · ${selectedDate}`, `Timezone · ${displayTimezone}`]}
+      />
 
       <section className="card stack-gap">
         <h2>Change date</h2>
