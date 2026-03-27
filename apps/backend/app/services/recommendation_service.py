@@ -18,7 +18,7 @@ from app.services.interfaces import (
     ScheduleProvider,
 )
 from app.services.markets import Market
-from app.services.probabilities import estimate_anytime_goal_probability
+from app.services.probabilities import estimate_anytime_goal_probability, estimate_anytime_goal_probability_diagnostics
 from app.services.odds import (
     NormalizedPlayerOdds,
     OddsEventMapping,
@@ -52,6 +52,11 @@ ANYTIME_TOP_PLAY_MIN_ODDS = 100
 ANYTIME_TOP_PLAY_MAX_ODDS = 900
 ANYTIME_UNDERDOG_MIN_ODDS = 250
 ANYTIME_UNDERDOG_MAX_ODDS = 1200
+ANYTIME_RECOMMENDATION_MIN_GAMES = 10.0
+ANYTIME_RECOMMENDATION_SOFT_MIN_GAMES = 20.0
+ANYTIME_RECOMMENDATION_MAX_SMALL_SAMPLE_PROBABILITY = 0.20
+ANYTIME_RECOMMENDATION_MIN_CONFIDENCE = 0.14
+ANYTIME_RECOMMENDATION_MIN_STABILIZATION = -0.16
 
 
 class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
@@ -247,6 +252,16 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
                 market_odds=odds_snapshot.market_odds_american,
                 market_probability=market_probability,
             )
+            anytime_diagnostics = (
+                estimate_anytime_goal_probability_diagnostics(projection.historical_production) if market == "anytime" else None
+            )
+            if market == "anytime" and not _anytime_candidate_guardrails_pass(
+                projection=projection,
+                market_probability=market_probability,
+                confidence_score=confidence_score,
+                diagnostics=anytime_diagnostics,
+            ):
+                continue
 
             recommendations.append(
                 Recommendation(
@@ -274,6 +289,8 @@ class ValueRecommendationService(RecommendationsProvider, AvailabilityProvider):
                             ev=ev,
                             confidence_score=confidence_score,
                             recommendation_score=0.0,
+                            market=market,
+                            anytime_diagnostics=anytime_diagnostics,
                         )
                         if _debug_transparency_enabled()
                         else None
@@ -934,6 +951,8 @@ def _build_model_debug_payload(
     ev: float,
     confidence_score: float,
     recommendation_score: float,
+    market: Market = "first_goal",
+    anytime_diagnostics: object | None = None,
 ) -> RecommendationModelDebug:
     features = _player_model_features(projection.historical_production)
     stable_baseline = (
@@ -949,7 +968,7 @@ def _build_model_debug_payload(
     recent_outcome_adjustment = _DEFAULT_TEMPLATE.player_recent_outcome_weight * outcome_weight * features.recent_outcome_form
     stable_component = stable_baseline * features.offensive_tier_multiplier
 
-    return RecommendationModelDebug(
+    payload = RecommendationModelDebug(
         stable_baseline=round(stable_baseline, 6),
         offensive_tier_multiplier=round(features.offensive_tier_multiplier, 6),
         stable_component=round(stable_component, 6),
@@ -964,6 +983,23 @@ def _build_model_debug_payload(
         confidence_score=round(confidence_score, 6),
         recommendation_score=round(recommendation_score, 6),
     )
+    if market == "anytime" and anytime_diagnostics is not None:
+        payload.anytime_recent_form_contribution = round(float(getattr(anytime_diagnostics, "recent_form_contribution", 0.0)), 6)
+        payload.anytime_season_baseline_contribution = round(
+            float(getattr(anytime_diagnostics, "season_baseline_contribution", 0.0)), 6
+        )
+        payload.anytime_usage_opportunity_contribution = round(
+            float(getattr(anytime_diagnostics, "usage_opportunity_contribution", 0.0)), 6
+        )
+        payload.anytime_matchup_history_contribution = round(
+            float(getattr(anytime_diagnostics, "matchup_history_contribution", 0.0)), 6
+        )
+        payload.anytime_stabilization_effect = round(float(getattr(anytime_diagnostics, "stabilization_effect", 0.0)), 6)
+        payload.anytime_expected_scoring_intensity = round(
+            float(getattr(anytime_diagnostics, "expected_scoring_intensity", 0.0)), 6
+        )
+        payload.anytime_probability = round(float(getattr(anytime_diagnostics, "anytime_probability", projection.model_probability)), 6)
+    return payload
 
 
 def _event_start_delta_seconds(provider_start_time: datetime, canonical_start_time: datetime, local_timezone_name: str) -> int:
@@ -1004,3 +1040,34 @@ def _underdog_odds_bounds(market: Market) -> tuple[int, int]:
     if market == "anytime":
         return ANYTIME_UNDERDOG_MIN_ODDS, ANYTIME_UNDERDOG_MAX_ODDS
     return UNDERDOG_MIN_ODDS, UNDERDOG_MAX_ODDS
+
+
+def _anytime_candidate_guardrails_pass(
+    projection: PlayerProjectionCandidate,
+    market_probability: float,
+    confidence_score: float,
+    diagnostics: object | None,
+) -> bool:
+    games_played = float(projection.historical_production.season_games_played or 0.0)
+    min_games = float(os.getenv("ANYTIME_RECOMMENDATION_MIN_GAMES", str(ANYTIME_RECOMMENDATION_MIN_GAMES)))
+    soft_min_games = float(os.getenv("ANYTIME_RECOMMENDATION_SOFT_MIN_GAMES", str(ANYTIME_RECOMMENDATION_SOFT_MIN_GAMES)))
+    small_sample_probability_cap = float(
+        os.getenv(
+            "ANYTIME_RECOMMENDATION_MAX_SMALL_SAMPLE_PROBABILITY",
+            str(ANYTIME_RECOMMENDATION_MAX_SMALL_SAMPLE_PROBABILITY),
+        )
+    )
+    min_confidence = float(os.getenv("ANYTIME_RECOMMENDATION_MIN_CONFIDENCE", str(ANYTIME_RECOMMENDATION_MIN_CONFIDENCE)))
+    min_stabilization = float(
+        os.getenv("ANYTIME_RECOMMENDATION_MIN_STABILIZATION", str(ANYTIME_RECOMMENDATION_MIN_STABILIZATION))
+    )
+
+    if games_played < min_games and market_probability > small_sample_probability_cap:
+        return False
+    if games_played < soft_min_games and confidence_score < min_confidence:
+        return False
+    if diagnostics is not None and hasattr(diagnostics, "stabilization_effect"):
+        stabilization_effect = float(getattr(diagnostics, "stabilization_effect"))
+        if stabilization_effect < min_stabilization:
+            return False
+    return True

@@ -243,6 +243,46 @@ def test_anytime_market_derives_probability_when_anytime_projection_missing() ->
     assert payload.recommendations[0].model_probability > 0.3
 
 
+def test_anytime_market_guardrails_filter_small_sample_high_probability_player() -> None:
+    class _SmallSampleProjectionProvider(ProjectionProvider):
+        def fetch_player_first_goal_projections(self, selected_date: date) -> list[PlayerProjectionCandidate]:
+            return [
+                PlayerProjectionCandidate(
+                    game_id="g-custom-vs-test",
+                    nhl_player_id="p-small",
+                    player_name="Small Sample Star",
+                    projected_team_name="Custom Home",
+                    model_probability=0.03,
+                    historical_production=PlayerHistoricalProduction(
+                        season_games_played=4,
+                        season_total_goals=4,
+                        season_total_shots=19,
+                        recent_5_total_goals=4,
+                        recent_10_total_goals=4,
+                        recent_5_total_shots=19,
+                        recent_10_total_shots=19,
+                    ),
+                    roster_eligibility=PlayerRosterEligibility(active_team_name="Custom Home", is_active_roster=True),
+                    first_goal_probability=0.03,
+                    anytime_probability=None,
+                )
+            ]
+
+    selected_date = date.today()
+    schedule_provider = StubScheduleProvider()
+    projection_provider = _SmallSampleProjectionProvider()
+    odds_provider = StubOddsProvider()
+    providers = _registry_with(
+        schedule_provider=schedule_provider,
+        projection_provider=projection_provider,
+        odds_provider=odds_provider,
+    )
+
+    payload = get_daily_recommendations(date=selected_date, market="anytime", providers=providers)
+
+    assert payload.recommendations == []
+
+
 class _StubRawOddsClient:
     provider_name = "the-odds-api"
 
