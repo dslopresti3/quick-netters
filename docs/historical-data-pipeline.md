@@ -137,3 +137,52 @@ Alternative helper script:
 ```bash
 PYTHONPATH=packages/modeling/src python packages/modeling/scripts/run_historical_pipeline.py --current-season 2026
 ```
+
+## Historical NHL game backfill (regular season + postseason)
+
+A dedicated backfill script now ingests historical game-level data directly from the same NHL API source used by the app (`api-web.nhle.com`).
+
+### Endpoint used
+
+- `GET /v1/schedule-season/{seasonKey}`
+
+Where `seasonKey` is an NHL season key such as `20252026`.
+
+### Game-type filtering at ingestion time
+
+During ingestion, game rows are normalized and filtered immediately:
+
+- include `gameType == 2` (regular season)
+- include `gameType == 3` (postseason/playoffs)
+- exclude `gameType == 1` (preseason)
+
+Preseason games are not written into the normalized historical games output.
+
+### Storage
+
+- Raw snapshot per season:
+  - `packages/modeling/data/raw/nhl_schedule/season=YYYYYYYY/schedule_season.json`
+- Durable normalized merged table:
+  - `packages/modeling/data/processed/historical_games/nhl_games.csv`
+
+Rows are merged by `(season, game_id)` so reruns upsert without duplicating records.
+
+### Manual run examples
+
+Single season key:
+
+```bash
+PYTHONPATH=packages/modeling/src python packages/modeling/scripts/backfill_historical_nhl_games.py --season 20252026
+```
+
+Season start-year range:
+
+```bash
+PYTHONPATH=packages/modeling/src python packages/modeling/scripts/backfill_historical_nhl_games.py --season-start 2018 --season-end 2025
+```
+
+All discoverable supported seasons (probe-based):
+
+```bash
+PYTHONPATH=packages/modeling/src python packages/modeling/scripts/backfill_historical_nhl_games.py --all-supported --probe-start-year 1917
+```
