@@ -132,9 +132,9 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
                     </div>
                   )}
                   <h4>Best Bet</h4>
-                  {gameSnapshot.best_bet ? <HistoricalPickCard pick={gameSnapshot.best_bet} selectedMarket={selectedMarket} /> : <p className="empty-state">No best bet stored.</p>}
+                  {gameSnapshot.best_bet ? <HistoricalPickCard pick={gameSnapshot.best_bet} selectedMarket={selectedMarket} variant="best_bet" /> : <p className="empty-state">No best bet stored.</p>}
                   <h4>Underdog Value Play</h4>
-                  {gameSnapshot.underdog_value_play ? <HistoricalPickCard pick={gameSnapshot.underdog_value_play} selectedMarket={selectedMarket} /> : <p className="empty-state">No underdog value play stored.</p>}
+                  {gameSnapshot.underdog_value_play ? <HistoricalPickCard pick={gameSnapshot.underdog_value_play} selectedMarket={selectedMarket} variant="underdog_value" /> : <p className="empty-state">No underdog value play stored.</p>}
                 </div>
               </article>
             ))}
@@ -145,14 +145,24 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
   );
 }
 
-function HistoricalPickCard({ pick, selectedMarket, rank }: { pick: Recommendation; selectedMarket: "first_goal" | "anytime"; rank?: number }) {
+function HistoricalPickCard({
+  pick,
+  selectedMarket,
+  rank,
+  variant = "top_play",
+}: {
+  pick: Recommendation;
+  selectedMarket: "first_goal" | "anytime";
+  rank?: number;
+  variant?: "top_play" | "best_bet" | "underdog_value";
+}) {
   return (
     <div className="stack-gap-sm">
       <div className={`history-result-badge history-result-${pick.result_status}`}>
         <strong>{pick.result_status.toUpperCase()}</strong>
         {pick.actual_result_detail ? ` · ${pick.actual_result_detail}` : ""}
       </div>
-      <RecommendationCard recommendation={pick} rank={rank} market={selectedMarket} />
+      <RecommendationCard recommendation={pick} rank={rank} market={selectedMarket} variant={variant} />
     </div>
   );
 }

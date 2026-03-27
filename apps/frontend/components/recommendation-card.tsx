@@ -6,6 +6,7 @@ type RecommendationCardProps = {
   recommendation: Recommendation;
   rank?: number;
   market?: RecommendationMarket;
+  variant?: "top_play" | "best_bet" | "underdog_value";
 };
 
 type MetricLabelProps = {
@@ -32,9 +33,10 @@ function MetricLabel({ label, tooltip }: MetricLabelProps) {
   );
 }
 
-export function RecommendationCard({ recommendation, rank, market = "first_goal" }: RecommendationCardProps) {
+export function RecommendationCard({ recommendation, rank, market = "first_goal", variant = "top_play" }: RecommendationCardProps) {
   const marketName = marketLabel(market);
   const marketChipClassName = `market-chip market-chip-${market}`;
+  const variantClassName = `recommendation-card-${variant}`;
   const seasonProductionLabels = marketSeasonProductionLabels(market);
   const seasonProductionValues = {
     left: recommendation.goals_this_year ?? "-",
@@ -42,14 +44,17 @@ export function RecommendationCard({ recommendation, rank, market = "first_goal"
   };
 
   return (
-    <article className="recommendation-card stack-gap-sm">
+    <article className={`recommendation-card ${variantClassName} stack-gap-sm`}>
       <header className="recommendation-card-header">
-        <div>
-          {typeof rank === "number" && <p className="recommendation-rank">#{rank}</p>}
+        <div className="recommendation-card-title-group">
+          {typeof rank === "number" && <p className="recommendation-rank">Top {rank}</p>}
           <h3 className="recommendation-player-name">{recommendation.player_name}</h3>
           <p className="helper-text">{recommendation.player_team ?? recommendation.team_name ?? `${recommendation.away_team} / ${recommendation.home_team}`}</p>
         </div>
-        <div className="recommendation-card-meta stack-gap-sm">
+        <div className="recommendation-card-meta">
+          <span className={`recommendation-variant-tag recommendation-variant-tag-${variant}`}>
+            {variant === "best_bet" ? "Best Bet" : variant === "underdog_value" ? "Underdog Value" : "Top Play"}
+          </span>
           <span className={marketChipClassName}>{marketName}</span>
           {recommendation.confidence_tag && (
             <span className={`confidence-badge confidence-${recommendation.confidence_tag}`}>{recommendation.confidence_tag}</span>
@@ -60,7 +65,7 @@ export function RecommendationCard({ recommendation, rank, market = "first_goal"
       <section className="metrics-section">
         <p className="metrics-heading">Primary betting metrics</p>
         <div className="primary-metrics-grid">
-          <div className="primary-metric">
+          <div className="primary-metric primary-metric-signal">
             <MetricLabel
               label="Model probability"
               tooltip={`Your model's estimated chance this player ${marketScoreVerb(market)}. Higher values indicate a stronger model signal.`}
@@ -69,20 +74,20 @@ export function RecommendationCard({ recommendation, rank, market = "first_goal"
           </div>
           <div className="primary-metric">
             <MetricLabel
-              label="Fair odds"
-              tooltip="Odds implied by the model probability. Compare this to market odds to spot potential value."
-            />
-            <strong className="metric-value-prominent">{formatSignedOdds(recommendation.fair_odds)}</strong>
-          </div>
-          <div className="primary-metric">
-            <MetricLabel
               label="Market odds"
               tooltip="The sportsbook's current price for this pick. Used to derive implied probability and EV."
             />
-            <strong className="metric-value-prominent">{formatSignedOdds(recommendation.market_odds)}</strong>
+            <strong className="metric-value">{formatSignedOdds(recommendation.market_odds)}</strong>
             <span className="metric-secondary-text">
               Implied: {recommendation.implied_probability !== undefined ? formatPercent(recommendation.implied_probability) : "-"}
             </span>
+          </div>
+          <div className="primary-metric">
+            <MetricLabel
+              label="Fair odds"
+              tooltip="Odds implied by the model probability. Compare this to market odds to spot potential value."
+            />
+            <strong className="metric-value">{formatSignedOdds(recommendation.fair_odds)}</strong>
           </div>
         </div>
       </section>
@@ -90,7 +95,7 @@ export function RecommendationCard({ recommendation, rank, market = "first_goal"
       <section className="metrics-section">
         <p className="metrics-heading">Value metrics</p>
         <div className="value-chip-row">
-          <div className="metric-chip metric-chip-value">
+          <div className="metric-chip metric-chip-value metric-chip-primary">
             <MetricLabel
               label="Edge"
               tooltip="Difference between model probability and implied probability. Positive edge suggests potential value."

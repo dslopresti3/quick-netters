@@ -65,6 +65,7 @@ function RecommendationSection({
   featuredClassName,
   ranked = false,
   selectedMarket,
+  cardVariant = "top_play",
 }: {
   title: string;
   description: string;
@@ -73,6 +74,7 @@ function RecommendationSection({
   featuredClassName?: string;
   ranked?: boolean;
   selectedMarket: "first_goal" | "anytime";
+  cardVariant?: "top_play" | "best_bet" | "underdog_value";
 }) {
   return (
     <section className={`card stack-gap recommendation-panel${featuredClassName ? ` ${featuredClassName}` : ""}`}>
@@ -81,11 +83,11 @@ function RecommendationSection({
       {picks.length === 0 ? (
         <p className="empty-state">{emptyState}</p>
       ) : picks.length === 1 ? (
-        <RecommendationCard recommendation={picks[0]} rank={ranked ? 1 : undefined} market={selectedMarket} />
+        <RecommendationCard recommendation={picks[0]} rank={ranked ? 1 : undefined} market={selectedMarket} variant={cardVariant} />
       ) : (
         <div className="recommendation-grid">
           {picks.map((pick, index) => (
-            <RecommendationCard key={pick.player_id} recommendation={pick} rank={ranked ? index + 1 : undefined} market={selectedMarket} />
+            <RecommendationCard key={pick.player_id} recommendation={pick} rank={ranked ? index + 1 : undefined} market={selectedMarket} variant={cardVariant} />
           ))}
         </div>
       )}
@@ -300,6 +302,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
             picks={topPlays}
             emptyState="No balanced Top 3 plays are qualified yet for this game."
             ranked
+            cardVariant="top_play"
           />
           <div className="featured-recommendations-grid">
             <RecommendationSection
@@ -309,6 +312,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
               picks={bestBet ? [bestBet] : []}
               emptyState="No best bet is qualified for this game yet."
               featuredClassName="featured-best-bet"
+              cardVariant="best_bet"
             />
             <RecommendationSection
               title="Underdog Value Play"
@@ -317,6 +321,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
               picks={underdogPlay ? [underdogPlay] : []}
               emptyState="No underdog value play is qualified for this game yet."
               featuredClassName="featured-underdog"
+              cardVariant="underdog_value"
             />
           </div>
         </section>

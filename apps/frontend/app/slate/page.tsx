@@ -167,7 +167,13 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
         ) : (
           <div className="recommendation-grid">
             {dailyRecommendations.recommendations.slice(0, 3).map((pick, index) => (
-              <RecommendationCard key={`${pick.game_id}-${pick.player_id}`} recommendation={pick} rank={index + 1} market={selectedMarket} />
+              <RecommendationCard
+                key={`${pick.game_id}-${pick.player_id}`}
+                recommendation={pick}
+                rank={index + 1}
+                market={selectedMarket}
+                variant="top_play"
+              />
             ))}
           </div>
         )}
