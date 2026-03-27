@@ -186,3 +186,73 @@ All discoverable supported seasons (probe-based):
 ```bash
 PYTHONPATH=packages/modeling/src python packages/modeling/scripts/backfill_historical_nhl_games.py --all-supported --probe-start-year 1917
 ```
+
+## Historical NHL player-game backfill (regular season + postseason)
+
+A companion backfill now ingests player-level game boxscore stats from NHL gamecenter and aligns rows to already-ingested historical games.
+
+### Endpoint used
+
+- `GET /v1/gamecenter/{gameId}/boxscore`
+
+### Source pattern and alignment rule
+
+- Input game list is `packages/modeling/data/processed/historical_games/nhl_games.csv`.
+- Only game rows with `game_type_code in {2,3}` are ingested.
+- Preseason (`game_type_code == 1`) is excluded before any player rows are fetched/written.
+
+### Storage
+
+- Raw snapshot per game:
+  - `packages/modeling/data/raw/nhl_gamecenter/season=YYYYYYYY/game_id={gameId}_boxscore.json`
+- Durable normalized merged table:
+  - `packages/modeling/data/processed/historical_player_games/nhl_player_games.csv`
+
+Rows are merged by `(season, game_id, player_id)` so reruns/backfills upsert without duplicate records.
+
+### Normalized fields captured
+
+Core identifiers/context:
+
+- `season`, `game_date`, `game_id`, `game_type`, `game_type_code`
+- `player_id`, `player_name`
+- `team`, `opponent`, `home_or_away`
+
+Scoring/shooting/time fields (when available in NHL response):
+
+- `goals`, `shots`, `points`, `assists`
+- `time_on_ice`, `power_play_time_on_ice`
+- `plus_minus`, `pim`, `hits`, `blocked_shots`
+- `faceoff_wins`, `faceoff_taken`
+- `power_play_goals`, `power_play_points`
+- `shorthanded_goals`, `shorthanded_points`
+- `shooting_pct`
+
+Goalie context:
+
+- `opposing_goalie_id`, `opposing_goalie_name`, `opposing_goalie_is_starter`
+- Starter is taken from team-level `starter`/`starterId`/`startingGoalieId` when present, with first listed team goalie as fallback.
+
+Lineage:
+
+- `source_endpoint`, `ingested_at_utc`
+
+### Manual run examples
+
+Single season key:
+
+```bash
+PYTHONPATH=packages/modeling/src python packages/modeling/scripts/backfill_historical_nhl_player_games.py --season 20252026
+```
+
+Season start-year range:
+
+```bash
+PYTHONPATH=packages/modeling/src python packages/modeling/scripts/backfill_historical_nhl_player_games.py --season-start 2018 --season-end 2025
+```
+
+All discoverable supported seasons:
+
+```bash
+PYTHONPATH=packages/modeling/src python packages/modeling/scripts/backfill_historical_nhl_player_games.py --all-supported --probe-start-year 1917
+```
