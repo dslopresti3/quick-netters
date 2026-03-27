@@ -45,6 +45,11 @@
   --space-sm: 0.75rem;
   --space-md: 1rem;
   --space-lg: 1.4rem;
+
+  /* Market accent defaults (first goal leaning) */
+  --market-accent-rgb: 120, 153, 245;
+  --market-accent-soft: rgba(96, 132, 232, 0.18);
+  --market-accent-border: rgba(120, 153, 245, 0.46);
 }
 
 * { box-sizing: border-box; }
@@ -261,8 +266,10 @@ h4 {
 
 .page-hero {
   border-radius: var(--radius-lg);
-  border: 1px solid rgba(71, 92, 138, 0.44);
-  background: linear-gradient(160deg, rgba(27, 39, 67, 0.64) 0%, rgba(11, 18, 32, 0.6) 100%);
+  border: 1px solid color-mix(in srgb, var(--market-accent-border) 66%, rgba(71, 92, 138, 0.44));
+  background:
+    linear-gradient(150deg, color-mix(in srgb, var(--market-accent-soft) 58%, transparent) 0%, transparent 42%),
+    linear-gradient(160deg, rgba(27, 39, 67, 0.64) 0%, rgba(11, 18, 32, 0.6) 100%);
   padding: 0.9rem 1rem;
 }
 
@@ -396,8 +403,8 @@ h4 {
 }
 
 .market-toggle-option.is-active {
-  background: linear-gradient(180deg, rgba(79, 125, 255, 0.26) 0%, rgba(79, 125, 255, 0.14) 100%);
-  color: #d5e2ff;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--market-accent-soft) 92%, transparent) 0%, color-mix(in srgb, var(--market-accent-soft) 58%, transparent) 100%);
+  color: #dce8ff;
 }
 
 .market-toggle-option:hover {
@@ -413,7 +420,23 @@ h4 {
   bottom: 0.08rem;
   height: 2px;
   border-radius: var(--radius-pill);
-  background: rgba(173, 197, 255, 0.8);
+  background: color-mix(in srgb, rgba(var(--market-accent-rgb), 0.9) 64%, rgba(173, 197, 255, 0.8));
+}
+
+.market-toggle-option-first_goal {
+  color: #adbee5;
+}
+
+.market-toggle-option-anytime {
+  color: #afc8c7;
+}
+
+.market-toggle-option-first_goal.is-active {
+  box-shadow: inset 0 1px 0 rgba(197, 213, 255, 0.1);
+}
+
+.market-toggle-option-anytime.is-active {
+  box-shadow: inset 0 1px 0 rgba(205, 239, 235, 0.11);
 }
 
 .candidate-list {
@@ -779,6 +802,60 @@ h4 {
     0 14px 30px rgba(2, 8, 22, 0.34);
 }
 
+.market-theme-first_goal {
+  --market-accent-rgb: 121, 152, 248;
+  --market-accent-soft: rgba(98, 132, 236, 0.2);
+  --market-accent-border: rgba(121, 152, 248, 0.52);
+}
+
+.market-theme-anytime {
+  --market-accent-rgb: 66, 195, 176;
+  --market-accent-soft: rgba(66, 195, 176, 0.18);
+  --market-accent-border: rgba(89, 205, 187, 0.5);
+}
+
+.market-theme-first_goal .slate-overview-card,
+.market-theme-first_goal .history-controls-card,
+.market-theme-first_goal .featured-scorer-summary {
+  border-color: rgba(118, 149, 232, 0.62);
+  background:
+    linear-gradient(152deg, rgba(88, 121, 219, 0.22) 0%, transparent 43%),
+    linear-gradient(180deg, rgba(21, 34, 59, 0.97) 0%, rgba(13, 23, 42, 0.98) 100%);
+}
+
+.market-theme-anytime .slate-overview-card,
+.market-theme-anytime .history-controls-card,
+.market-theme-anytime .featured-scorer-summary {
+  border-color: rgba(82, 177, 162, 0.6);
+  background:
+    linear-gradient(150deg, rgba(69, 151, 142, 0.2) 0%, transparent 44%),
+    linear-gradient(180deg, rgba(21, 33, 53, 0.97) 0%, rgba(13, 23, 39, 0.98) 100%);
+}
+
+.market-theme-first_goal .history-meta-card,
+.market-theme-first_goal .history-control-panel,
+.market-theme-first_goal .slate-matchup-card {
+  border-color: rgba(111, 139, 207, 0.5);
+}
+
+.market-theme-anytime .history-meta-card,
+.market-theme-anytime .history-control-panel,
+.market-theme-anytime .slate-matchup-card {
+  border-color: rgba(79, 160, 149, 0.48);
+}
+
+.market-theme-first_goal .recommendation-section-heading,
+.market-theme-first_goal .slate-overview-controls,
+.market-theme-first_goal .history-game-header {
+  border-color: rgba(120, 149, 219, 0.26);
+}
+
+.market-theme-anytime .recommendation-section-heading,
+.market-theme-anytime .slate-overview-controls,
+.market-theme-anytime .history-game-header {
+  border-color: rgba(92, 173, 162, 0.24);
+}
+
 .featured-summary-kicker {
   margin: 0 0 0.3rem;
   font-size: 0.66rem;
@@ -1043,15 +1120,15 @@ h4 {
 }
 
 .market-chip-first_goal {
-  color: #aac0ff;
-  background: var(--accent-primary-soft);
-  border-color: rgba(124, 153, 246, 0.46);
+  color: #b7caff;
+  background: linear-gradient(180deg, rgba(96, 132, 232, 0.28) 0%, rgba(59, 92, 183, 0.19) 100%);
+  border-color: rgba(124, 153, 246, 0.5);
 }
 
 .market-chip-anytime {
-  color: #8ee7dd;
-  background: var(--accent-secondary-soft);
-  border-color: rgba(83, 214, 204, 0.44);
+  color: #a4efe4;
+  background: linear-gradient(180deg, rgba(71, 183, 168, 0.3) 0%, rgba(38, 126, 116, 0.2) 100%);
+  border-color: rgba(83, 214, 204, 0.48);
 }
 
 .recommendation-rank {

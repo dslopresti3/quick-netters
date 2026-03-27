@@ -28,7 +28,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
   const availableDates = historyAvailability.available_dates;
 
   return (
-    <main className="page stack-gap-lg">
+    <main className={`page stack-gap-lg market-theme-${selectedMarket}`}>
       <AppShellHeader
         activeNav="history"
         selectedDate={selectedDate}
@@ -46,6 +46,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
         title="Historical Picks"
         description="Archive and review locked picks, market outcomes, and historical recommendation quality."
         contextChips={[`Market · ${marketTitle}`, `Archive Date · ${selectedDate}`, "Mode · Locked Snapshots"]}
+        market={selectedMarket}
       >
         <div className="history-hero-meta-grid">
           <div className="history-meta-card">

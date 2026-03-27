@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ReactNode } from "react";
 import { MarketToggle } from "./market-toggle";
 import type { RecommendationMarket } from "../lib/market";
+import { marketLabel } from "../lib/market";
 
 type AppShellHeaderProps = {
   activeNav: "home" | "slate" | "history";
@@ -66,6 +67,7 @@ export function AppShellHeader({
               path={marketPath}
             />
           )}
+          {selectedMarket && <span className={`market-chip market-chip-${selectedMarket}`}>Market · {marketLabel(selectedMarket)}</span>}
           {selectedDate && <span className="context-chip">Date · {selectedDate}</span>}
           {utilityLinks?.map((link) => (
             <Link key={link.href} href={link.href} className="utility-link">
