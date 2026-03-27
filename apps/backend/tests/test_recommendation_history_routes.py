@@ -5,6 +5,7 @@ from app.api.routes import export_recommendation_history, get_recommendation_his
 from app.api.schemas import GameSummary, Recommendation
 from app.services.interfaces import ScheduleProvider
 from app.services.provider_wiring import ProviderRegistry
+from app.services.recommendation_history import GameOutcome
 from app.services.recommendation_history import RecommendationHistoryService
 
 
@@ -51,6 +52,10 @@ class _CountingRecommendationService:
             ev=0.15,
         )
 
+
+def _pending_outcome(_: str) -> GameOutcome:
+    return GameOutcome(game_completed=False, first_goal_scorer_player_id=None, goal_counts_by_player_id={})
+
 def test_history_route_returns_only_persisted_snapshots(tmp_path: Path) -> None:
     selected_date = date(2026, 3, 24)
     schedule_provider = _StubScheduleProvider()
@@ -59,6 +64,7 @@ def test_history_route_returns_only_persisted_snapshots(tmp_path: Path) -> None:
         recommendation_service=recommendation_service,  # type: ignore[arg-type]
         schedule_provider=schedule_provider,
         storage_path=tmp_path / "history.json",
+        outcome_fetcher=_pending_outcome,
     )
     providers = ProviderRegistry(
         schedule_provider=schedule_provider,
@@ -81,6 +87,7 @@ def test_history_availability_lists_browsable_saved_dates_by_market(tmp_path: Pa
         recommendation_service=recommendation_service,  # type: ignore[arg-type]
         schedule_provider=schedule_provider,
         storage_path=tmp_path / "history.json",
+        outcome_fetcher=_pending_outcome,
     )
     providers = ProviderRegistry(
         schedule_provider=schedule_provider,
@@ -110,6 +117,7 @@ def test_history_route_loads_persisted_snapshot_from_previous_day(tmp_path: Path
         recommendation_service=_CountingRecommendationService(),  # type: ignore[arg-type]
         schedule_provider=_StubScheduleProvider(),
         storage_path=storage_path,
+        outcome_fetcher=_pending_outcome,
     )
     writer_service.ensure_snapshot(saved_date, "first_goal", now_utc=datetime(2026, 3, 24, 22, 30, tzinfo=timezone.utc))
 
@@ -119,6 +127,7 @@ def test_history_route_loads_persisted_snapshot_from_previous_day(tmp_path: Path
         recommendation_service=reader_recommendation_service,  # type: ignore[arg-type]
         schedule_provider=reader_schedule_provider,
         storage_path=storage_path,
+        outcome_fetcher=_pending_outcome,
     )
     providers = ProviderRegistry(
         schedule_provider=reader_schedule_provider,
@@ -144,6 +153,7 @@ def test_history_export_supports_xlsx_format(tmp_path: Path) -> None:
         recommendation_service=recommendation_service,  # type: ignore[arg-type]
         schedule_provider=schedule_provider,
         storage_path=tmp_path / "history.json",
+        outcome_fetcher=_pending_outcome,
     )
     history_service.ensure_snapshot(selected_date, "first_goal", now_utc=datetime(2026, 3, 24, 22, 30, tzinfo=timezone.utc))
     providers = ProviderRegistry(

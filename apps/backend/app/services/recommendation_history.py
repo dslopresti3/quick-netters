@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from io import BytesIO, StringIO
 import json
@@ -8,17 +9,32 @@ import os
 from pathlib import Path
 from threading import Lock
 from tempfile import NamedTemporaryFile
+from typing import Callable
 from xml.sax.saxutils import escape
 from zoneinfo import ZoneInfo
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from app.api.schemas import GameSummary, Recommendation
+from app.services.http_client import fetch_json
 from app.services.markets import Market
 from app.services.odds import american_to_implied_probability
 from app.services.recommendation_service import ValueRecommendationService
 from app.services.interfaces import ScheduleProvider
 
 EASTERN_TIMEZONE = ZoneInfo("America/New_York")
+NHL_WEB_BASE = "https://api-web.nhle.com/v1"
+NHL_PLAY_BY_PLAY_TIMEOUT_SECONDS = 12
+FINAL_GAME_STATES = {"FINAL", "OFF"}
+RESULT_PENDING = "pending"
+RESULT_HIT = "hit"
+RESULT_MISS = "miss"
+
+
+@dataclass(frozen=True)
+class GameOutcome:
+    game_completed: bool
+    first_goal_scorer_player_id: str | None
+    goal_counts_by_player_id: dict[str, int]
 
 
 class RecommendationHistoryService:
@@ -29,10 +45,12 @@ class RecommendationHistoryService:
         recommendation_service: ValueRecommendationService,
         schedule_provider: ScheduleProvider,
         storage_path: Path,
+        outcome_fetcher: Callable[[str], GameOutcome] | None = None,
     ) -> None:
         self._recommendation_service = recommendation_service
         self._schedule_provider = schedule_provider
         self._storage_path = storage_path
+        self._outcome_fetcher = outcome_fetcher or _fetch_game_outcome
         self._lock = Lock()
 
     def compute_lock_context(self, selected_date: date) -> tuple[datetime, datetime] | None:
@@ -116,6 +134,7 @@ class RecommendationHistoryService:
         return None
 
     def list_snapshots(self, selected_date: date | None = None, market: Market | None = None) -> list[dict]:
+        self.grade_snapshots(selected_date=selected_date, market=market)
         payload = self._load_storage()
         snapshots = payload["snapshots"]
         filtered = [
@@ -140,6 +159,7 @@ class RecommendationHistoryService:
         return sorted(set(snapshot_dates))
 
     def export_csv(self, selected_date: date | None = None, market: Market | None = None) -> str:
+        self.grade_snapshots(selected_date=selected_date, market=market)
         snapshots = self.list_snapshots(selected_date=selected_date, market=market)
         output = StringIO()
         writer = csv.DictWriter(output, fieldnames=self._export_header())
@@ -149,6 +169,7 @@ class RecommendationHistoryService:
         return output.getvalue().rstrip("\n")
 
     def export_xlsx(self, selected_date: date | None = None, market: Market | None = None) -> bytes:
+        self.grade_snapshots(selected_date=selected_date, market=market)
         snapshots = self.list_snapshots(selected_date=selected_date, market=market)
         header = self._export_header()
         rows = [[row[column] for column in header] for row in self._snapshot_export_rows(snapshots)]
@@ -171,6 +192,11 @@ class RecommendationHistoryService:
             "market_odds",
             "edge",
             "ev",
+            "result_status",
+            "game_completed",
+            "graded_at",
+            "actual_stat_value",
+            "actual_result_detail",
         ]
 
     def _snapshot_export_rows(self, snapshots: list[dict]) -> list[dict[str, str | int | float | None]]:
@@ -207,6 +233,11 @@ class RecommendationHistoryService:
                     "market_odds": market_odds,
                     "edge": rec.get("edge"),
                     "ev": rec.get("ev"),
+                    "result_status": rec.get("result_status", RESULT_PENDING),
+                    "game_completed": rec.get("game_completed", False),
+                    "graded_at": rec.get("graded_at"),
+                    "actual_stat_value": rec.get("actual_stat_value"),
+                    "actual_result_detail": rec.get("actual_result_detail"),
                 }
             )
 
@@ -265,6 +296,59 @@ class RecommendationHistoryService:
             "</worksheet>"
         )
 
+    def grade_snapshots(
+        self,
+        selected_date: date | None = None,
+        market: Market | None = None,
+        *,
+        now_utc: datetime | None = None,
+    ) -> int:
+        with self._lock:
+            payload = self._load_storage_unlocked()
+            snapshots = payload["snapshots"]
+            outcome_cache: dict[str, GameOutcome] = {}
+            changes = 0
+            for snapshot in snapshots:
+                if selected_date is not None and snapshot.get("date") != selected_date.isoformat():
+                    continue
+                snapshot_market = snapshot.get("market")
+                if market is not None and snapshot_market != market:
+                    continue
+                if snapshot_market not in {"first_goal", "anytime"}:
+                    continue
+                changes += self._grade_snapshot(snapshot, snapshot_market, outcome_cache, now_utc=now_utc)
+            if changes > 0:
+                self._save_storage_unlocked(payload)
+            return changes
+
+    def _grade_snapshot(
+        self,
+        snapshot: dict,
+        market: Market,
+        outcome_cache: dict[str, GameOutcome],
+        *,
+        now_utc: datetime | None = None,
+    ) -> int:
+        changes = 0
+        graded_at = (now_utc or datetime.now(timezone.utc)).isoformat()
+        for rec in _iter_snapshot_picks(snapshot):
+            game_id = str(rec.get("game_id", "")).strip()
+            player_id = str(rec.get("player_id", "")).strip()
+            if not game_id or not player_id:
+                continue
+            existing_status = rec.get("result_status")
+            existing_completed = bool(rec.get("game_completed", False))
+            if existing_completed and existing_status in {RESULT_HIT, RESULT_MISS}:
+                continue
+            outcome = outcome_cache.get(game_id)
+            if outcome is None:
+                outcome = self._outcome_fetcher(game_id)
+                outcome_cache[game_id] = outcome
+            new_fields = _grade_pick_fields(rec=rec, market=market, player_id=player_id, outcome=outcome, graded_at=graded_at)
+            if _merge_updates(rec, new_fields):
+                changes += 1
+        return changes
+
     def _load_storage(self) -> dict:
         with self._lock:
             return self._load_storage_unlocked()
@@ -312,6 +396,97 @@ def _column_name(index: int) -> str:
         current, remainder = divmod(current - 1, 26)
         result = chr(65 + remainder) + result
     return result
+
+
+def _iter_snapshot_picks(snapshot: dict):
+    for rec in snapshot.get("top_overall", []):
+        if isinstance(rec, dict):
+            yield rec
+    for game_snapshot in snapshot.get("games", []):
+        if not isinstance(game_snapshot, dict):
+            continue
+        for rec in game_snapshot.get("top_plays", []):
+            if isinstance(rec, dict):
+                yield rec
+        for bucket in ("best_bet", "underdog_value_play"):
+            rec = game_snapshot.get(bucket)
+            if isinstance(rec, dict):
+                yield rec
+
+
+def _merge_updates(rec: dict, updates: dict[str, object | None]) -> bool:
+    changed = False
+    for key, value in updates.items():
+        if rec.get(key) != value:
+            rec[key] = value
+            changed = True
+    return changed
+
+
+def _grade_pick_fields(*, rec: dict, market: Market, player_id: str, outcome: GameOutcome, graded_at: str) -> dict[str, object | None]:
+    if not outcome.game_completed:
+        return {
+            "result_status": RESULT_PENDING,
+            "game_completed": False,
+            "graded_at": None,
+            "actual_stat_value": None,
+            "actual_result_detail": None,
+        }
+
+    if market == "first_goal":
+        hit = outcome.first_goal_scorer_player_id == player_id
+        detail = "scored first goal" if hit else "did not score first goal"
+        actual_value = 1 if hit else 0
+    else:
+        goals = int(outcome.goal_counts_by_player_id.get(player_id, 0))
+        hit = goals >= 1
+        detail = f"scored {goals} goal" if goals == 1 else f"scored {goals} goals"
+        actual_value = goals
+
+    return {
+        "result_status": RESULT_HIT if hit else RESULT_MISS,
+        "game_completed": True,
+        "graded_at": graded_at,
+        "actual_stat_value": actual_value,
+        "actual_result_detail": detail,
+    }
+
+
+def _fetch_game_outcome(game_id: str) -> GameOutcome:
+    payload = fetch_json(
+        url=f"{NHL_WEB_BASE}/gamecenter/{game_id}/play-by-play",
+        timeout_seconds=NHL_PLAY_BY_PLAY_TIMEOUT_SECONDS,
+    )
+    game_state = str(payload.get("gameState", "")).strip().upper()
+    game_completed = game_state in FINAL_GAME_STATES
+    plays = payload.get("plays")
+    if not isinstance(plays, list):
+        return GameOutcome(
+            game_completed=game_completed,
+            first_goal_scorer_player_id=None,
+            goal_counts_by_player_id={},
+        )
+
+    goals = [play for play in plays if isinstance(play, dict) and play.get("typeDescKey") == "goal"]
+    goals_sorted = sorted(goals, key=lambda play: int(play.get("sortOrder", 10**9)))
+    first_goal_scorer: str | None = None
+    goal_counts: dict[str, int] = {}
+    for idx, goal in enumerate(goals_sorted):
+        details = goal.get("details")
+        if not isinstance(details, dict):
+            continue
+        scorer_raw = details.get("scoringPlayerId")
+        scorer = str(scorer_raw).strip() if scorer_raw is not None else ""
+        if not scorer:
+            continue
+        goal_counts[scorer] = goal_counts.get(scorer, 0) + 1
+        if idx == 0:
+            first_goal_scorer = scorer
+    return GameOutcome(
+        game_completed=game_completed,
+        first_goal_scorer_player_id=first_goal_scorer,
+        goal_counts_by_player_id=goal_counts,
+    )
 
 
 _CONTENT_TYPES_XML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
