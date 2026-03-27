@@ -18,6 +18,8 @@ def _player_row(
     toi: str = "16:00",
     pp_toi: str = "02:00",
     pp_goals: int = 0,
+    opponent: str = "Opp",
+    opposing_goalie_id: str = "",
 ) -> dict[str, str]:
     return {
         "season": season,
@@ -27,11 +29,13 @@ def _player_row(
         "player_id": player_id,
         "player_name": player_name,
         "team": team,
+        "opponent": opponent,
         "goals": str(goals),
         "shots": str(shots),
         "time_on_ice": toi,
         "power_play_time_on_ice": pp_toi,
         "power_play_goals": str(pp_goals),
+        "opposing_goalie_id": opposing_goalie_id,
     }
 
 
@@ -121,3 +125,89 @@ def test_small_sample_hot_streak_is_shrunk_relative_to_sustained_player() -> Non
     assert hot["projected_goals_per_game"] < hot["goals_per_game_last_5"]
     assert hot["projected_goals_per_game"] < vet["projected_goals_per_game"]
     assert hot["recent_form_confidence"] < vet["recent_form_confidence"]
+
+
+def test_player_vs_team_matchup_history_is_heavily_shrunk_for_small_samples() -> None:
+    as_of = date(2026, 3, 10)
+    rows = []
+    for idx in range(20):
+        rows.append(
+            _player_row(
+                player_id="77",
+                player_name="Matchup Skater",
+                team="Leafs",
+                game_date=as_of - timedelta(days=idx + 1),
+                goals=1 if idx % 3 == 0 else 0,
+                shots=4,
+                opponent="Bruins" if idx < 2 else "Sens",
+            )
+        )
+
+    features = build_player_probability_features(
+        rows,
+        as_of_date=as_of,
+        season="20252026",
+        matchup_team_by_player={"77": "Bruins"},
+    )
+    row = features[0]
+
+    assert row["vs_opponent_team_games"] == 2
+    assert row["vs_opponent_team_goals_per_game"] == 0.5
+    assert row["vs_opponent_team_goals_per_game_stabilized"] < 0.6
+    assert row["vs_opponent_team_goals_rate_modifier"] <= 1.25
+    assert row["vs_opponent_team_confidence"] < 0.1
+
+
+def test_player_vs_goalie_matchup_history_is_moderate_even_with_larger_samples() -> None:
+    as_of = date(2026, 3, 10)
+    rows = []
+    for idx in range(26):
+        rows.append(
+            _player_row(
+                player_id="12",
+                player_name="Shooter",
+                team="Rangers",
+                game_date=as_of - timedelta(days=idx + 1),
+                goals=1 if idx % 4 == 0 else 0,
+                shots=5,
+                opponent="Devils",
+                opposing_goalie_id="goalie-a" if idx < 12 else "goalie-b",
+            )
+        )
+
+    features = build_player_probability_features(
+        rows,
+        as_of_date=as_of,
+        season="20252026",
+        matchup_goalie_by_player={"12": "goalie-a"},
+    )
+    row = features[0]
+
+    assert row["vs_opposing_goalie_games"] == 12
+    assert row["vs_opposing_goalie_available"] is True
+    assert row["vs_opposing_goalie_confidence"] <= 0.14
+    assert row["vs_opposing_goalie_goals_rate_modifier"] <= 1.25
+    assert abs(row["vs_opposing_goalie_goals_per_game_stabilized"] - row["projected_goals_per_game"]) < 0.2
+
+
+def test_goalie_matchup_features_fall_back_when_linkage_missing() -> None:
+    as_of = date(2026, 3, 10)
+    rows = [
+        _player_row(
+            player_id="88",
+            player_name="No Link Skater",
+            team="Kings",
+            game_date=as_of - timedelta(days=idx + 1),
+            goals=1 if idx % 5 == 0 else 0,
+            shots=3,
+            opponent="Ducks",
+            opposing_goalie_id="",
+        )
+        for idx in range(10)
+    ]
+    features = build_player_probability_features(rows, as_of_date=as_of, season="20252026")
+    row = features[0]
+
+    assert row["vs_opposing_goalie_available"] is False
+    assert row["vs_opposing_goalie_games"] == 0
+    assert row["vs_opposing_goalie_goals_rate_modifier"] == 1.0
