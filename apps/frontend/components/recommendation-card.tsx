@@ -34,6 +34,7 @@ function MetricLabel({ label, tooltip }: MetricLabelProps) {
 
 export function RecommendationCard({ recommendation, rank, market = "first_goal" }: RecommendationCardProps) {
   const marketName = marketLabel(market);
+  const marketChipClassName = `market-chip market-chip-${market}`;
   const seasonProductionLabels = marketSeasonProductionLabels(market);
   const seasonProductionValues = {
     left: recommendation.goals_this_year ?? "-",
@@ -49,7 +50,7 @@ export function RecommendationCard({ recommendation, rank, market = "first_goal"
           <p className="helper-text">{recommendation.player_team ?? recommendation.team_name ?? `${recommendation.away_team} / ${recommendation.home_team}`}</p>
         </div>
         <div className="recommendation-card-meta stack-gap-sm">
-          <span className="market-chip">{marketName}</span>
+          <span className={marketChipClassName}>{marketName}</span>
           {recommendation.confidence_tag && (
             <span className={`confidence-badge confidence-${recommendation.confidence_tag}`}>{recommendation.confidence_tag}</span>
           )}
