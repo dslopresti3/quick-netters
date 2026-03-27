@@ -106,7 +106,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
 
   if (!availability.valid_by_product_rule) {
     return (
-      <main className="page stack-gap-lg">
+      <main className={`page stack-gap-lg market-theme-${selectedMarket}`}>
         <AppShellHeader
           activeNav="slate"
           selectedDate={selectedDate}
@@ -118,6 +118,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
           title="Game Detail"
           description="Matchup-level model context and recommendation view."
           contextChips={[`Market · ${selectedMarketLabel}`, `Date · ${selectedDate}`]}
+          market={selectedMarket}
         />
         <section className="card stack-gap">
           <h2>Invalid date</h2>
@@ -134,7 +135,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
 
   if (!availability.schedule_available) {
     return (
-      <main className="page stack-gap">
+      <main className={`page stack-gap market-theme-${selectedMarket}`}>
         <AppShellHeader
           activeNav="slate"
           selectedDate={selectedDate}
@@ -146,6 +147,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
           title="Game Detail"
           description="Matchup-level model context and recommendation view."
           contextChips={[`Market · ${selectedMarketLabel}`, `Date · ${selectedDate}`]}
+          market={selectedMarket}
         />
         <section className="card stack-gap">
           <h2>No scheduled games</h2>
@@ -164,7 +166,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
 
   if (!gameResponse) {
     return (
-      <main className="page stack-gap">
+      <main className={`page stack-gap market-theme-${selectedMarket}`}>
         <AppShellHeader
           activeNav="slate"
           selectedDate={selectedDate}
@@ -176,6 +178,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
           title="Game Detail"
           description="Matchup-level model context and recommendation view."
           contextChips={[`Market · ${selectedMarketLabel}`, `Date · ${selectedDate}`]}
+          market={selectedMarket}
         />
         <section className="card">
           <p className="empty-state">No game detail exists for this matchup and date yet.</p>
@@ -206,7 +209,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
   const projectionMetricLabel = selectedMarket === "anytime" ? "Anytime scoring probability" : "First-goal probability";
 
   return (
-    <main className="page stack-gap-lg game-detail-page">
+    <main className={`page stack-gap-lg game-detail-page market-theme-${selectedMarket}`}>
       <AppShellHeader
         activeNav="slate"
         selectedDate={selectedDate}
@@ -224,6 +227,7 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
         title={`${gameResponse.game.away_team} @ ${gameResponse.game.home_team}`}
         description={`Start ${gameResponse.game.display_game_time ?? new Date(gameResponse.game.game_time).toLocaleString("en-US", { timeZone: displayTimezone })} ${gameResponse.game.display_timezone ?? displayTimezone}`}
         contextChips={[`Market · ${selectedMarketLabel}`, `Date · ${gameResponse.date}`, "View · Matchup Intelligence"]}
+        market={selectedMarket}
       />
 
       {gameResponse.notes.length > 0 && (

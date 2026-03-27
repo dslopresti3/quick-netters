@@ -24,7 +24,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
 
   if (!availability.valid_by_product_rule) {
     return (
-      <main className="page stack-gap-lg">
+      <main className={`page stack-gap-lg market-theme-${selectedMarket}`}>
         <AppShellHeader
           activeNav="slate"
           selectedDate={selectedDate}
@@ -36,6 +36,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
           title="Daily Slate"
           description="Track today’s board and quickly pivot by market or date."
           contextChips={[`Market · ${marketTitle}`, `Date · ${selectedDate}`]}
+          market={selectedMarket}
         />
         <section className="card stack-gap">
           <h2>Invalid date</h2>
@@ -60,7 +61,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
 
   if (!availability.schedule_available) {
     return (
-      <main className="page stack-gap-lg">
+      <main className={`page stack-gap-lg market-theme-${selectedMarket}`}>
         <AppShellHeader
           activeNav="slate"
           selectedDate={selectedDate}
@@ -72,6 +73,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
           title="Daily Slate"
           description="Scheduled games and value picks for the selected board."
           contextChips={[`Market · ${marketTitle}`, `Date · ${selectedDate}`]}
+          market={selectedMarket}
         />
 
         <section className="card stack-gap">
@@ -110,7 +112,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
   }, {});
 
   return (
-    <main className="page stack-gap-lg slate-page">
+    <main className={`page stack-gap-lg slate-page market-theme-${selectedMarket}`}>
       <AppShellHeader
         activeNav="slate"
         selectedDate={selectedDate}
@@ -128,6 +130,7 @@ export default async function SlatePage({ searchParams }: SlatePageProps) {
         title="Daily Slate"
         description="Live slate intelligence with top model-driven value opportunities."
         contextChips={[`Market · ${marketTitle}`, `Date · ${selectedDate}`, `Timezone · ${displayTimezone}`]}
+        market={selectedMarket}
       />
 
       <section className="card slate-overview-card stack-gap">
