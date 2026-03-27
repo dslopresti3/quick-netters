@@ -58,6 +58,13 @@ class RecommendationModelDebug(APIModel):
     ev: float
     confidence_score: float
     recommendation_score: float
+    anytime_recent_form_contribution: float | None = None
+    anytime_season_baseline_contribution: float | None = None
+    anytime_usage_opportunity_contribution: float | None = None
+    anytime_matchup_history_contribution: float | None = None
+    anytime_stabilization_effect: float | None = None
+    anytime_expected_scoring_intensity: float | None = None
+    anytime_probability: float | None = None
 
 
 class GameSummary(APIModel):

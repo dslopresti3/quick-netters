@@ -1,5 +1,5 @@
 from app.services.interfaces import PlayerHistoricalProduction
-from app.services.probabilities import estimate_anytime_goal_probability
+from app.services.probabilities import estimate_anytime_goal_probability, estimate_anytime_goal_probability_diagnostics
 
 
 def test_anytime_probability_respects_player_tiers() -> None:
@@ -99,3 +99,27 @@ def test_matchup_history_modifier_is_lightweight() -> None:
     assert baseline_p is not None and matchup_p is not None
     assert matchup_p > baseline_p
     assert (matchup_p - baseline_p) < 0.05
+
+
+def test_anytime_diagnostics_exposes_component_breakdown() -> None:
+    history = PlayerHistoricalProduction(
+        season_games_played=61,
+        season_total_goals=26,
+        season_total_shots=190,
+        recent_5_total_goals=3,
+        recent_10_total_goals=4,
+        recent_5_total_shots=17,
+        recent_10_total_shots=31,
+        projected_pp_goals_per_60=2.1,
+        vs_opponent_team_goal_rate_index=1.15,
+        vs_opponent_team_confidence=0.8,
+    )
+
+    diagnostics = estimate_anytime_goal_probability_diagnostics(history)
+
+    assert diagnostics is not None
+    assert diagnostics.recent_form_contribution > 0
+    assert diagnostics.season_baseline_contribution > 0
+    assert diagnostics.usage_opportunity_contribution > 0
+    assert diagnostics.expected_scoring_intensity > 0
+    assert 0 < diagnostics.anytime_probability < 1
