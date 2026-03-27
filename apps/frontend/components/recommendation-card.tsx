@@ -53,7 +53,7 @@ export function RecommendationCard({ recommendation, rank, market = "first_goal"
         </div>
         <div className="recommendation-card-meta">
           <span className={`recommendation-variant-tag recommendation-variant-tag-${variant}`}>
-            {variant === "best_bet" ? "Best Bet" : variant === "underdog_value" ? "Underdog Value" : "Top Play"}
+            {variant === "best_bet" ? "Best Bet" : variant === "underdog_value" ? "Underdog Value Play" : "Top Play"}
           </span>
           <span className={marketChipClassName}>{marketName}</span>
           {recommendation.confidence_tag && (
