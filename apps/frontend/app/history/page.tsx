@@ -25,6 +25,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
   const historyResponse = await fetchRecommendationHistory(selectedDate, selectedMarket);
   const snapshot = historyResponse.snapshots[0];
   const topOverallSummary = summarizeStatuses(snapshot?.top_overall ?? []);
+  const availableDates = historyAvailability.available_dates;
 
   return (
     <main className="page stack-gap-lg">
@@ -43,44 +44,79 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
       />
       <PageHeader
         title="Historical Picks"
-        description="Evaluate locked snapshots, outcomes, and export-ready performance data."
-        contextChips={[`Market · ${marketTitle}`, `Date · ${selectedDate}`, "Mode · Stored Snapshots"]}
-      />
-
-      <section className="card stack-gap">
-        <h2>Change date</h2>
-        <DatePickerForm
-          defaultDate={selectedDate}
-          minDate={historyAvailability.min_available_date ?? selectedDate}
-          maxDate={historyAvailability.max_available_date ?? selectedDate}
-          submitLabel="Load historical picks"
-          actionPath="/history"
-          market={selectedMarket}
-        />
-        <p className="helper-text">
-          Saved snapshot dates: {historyAvailability.available_dates.length > 0 ? historyAvailability.available_dates.join(", ") : "none yet"}.
-        </p>
-        <p className="helper-text">Lock cutoff (ET): {historyResponse.lock_cutoff_et ? new Date(historyResponse.lock_cutoff_et).toLocaleString("en-US", { timeZone: "America/New_York" }) : "Not available"}</p>
-        {historyAvailability.available_dates.length > 0 && (
-          <div className="stack-gap-sm">
-            <h3>Browse saved dates</h3>
-            <div className="stack-gap-sm">
-              {historyAvailability.available_dates.map((availableDate) => (
-                <Link
-                  key={availableDate}
-                  href={`/history?date=${encodeURIComponent(availableDate)}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`}
-                  className="secondary-link"
-                >
-                  {availableDate === selectedDate ? `✓ ${availableDate}` : availableDate}
-                </Link>
-              ))}
-            </div>
+        description="Archive and review locked picks, market outcomes, and historical recommendation quality."
+        contextChips={[`Market · ${marketTitle}`, `Archive Date · ${selectedDate}`, "Mode · Locked Snapshots"]}
+      >
+        <div className="history-hero-meta-grid">
+          <div className="history-meta-card">
+            <p className="history-meta-kicker">Selected Archive Date</p>
+            <strong>{selectedDate}</strong>
           </div>
-        )}
-      </section>
+          <div className="history-meta-card">
+            <p className="history-meta-kicker">Market</p>
+            <strong>{marketTitle}</strong>
+          </div>
+          <div className="history-meta-card">
+            <p className="history-meta-kicker">Snapshot Status</p>
+            <strong>{snapshot ? "Stored and reviewable" : historyResponse.is_locked ? "Locked, snapshot unavailable" : "Live, pending lock"}</strong>
+          </div>
+        </div>
+      </PageHeader>
 
-      <section className="card stack-gap">
-        <h2>Status · {marketTitle} · {selectedDate}</h2>
+      <section className="card history-controls-card stack-gap">
+        <div className="history-section-header">
+          <div className="stack-gap-sm">
+            <p className="history-section-kicker">Archive Controls</p>
+            <h2>Browse by date and market</h2>
+          </div>
+          <div className="history-export-actions">
+            <Link href={recommendationHistoryExportUrl("json", selectedDate, selectedMarket)} className="secondary-link">Export JSON</Link>
+            <Link href={recommendationHistoryExportUrl("csv", selectedDate, selectedMarket)} className="secondary-link">Export CSV</Link>
+            <Link href={recommendationHistoryExportUrl("xlsx", selectedDate, selectedMarket)} className="secondary-link">Export Excel</Link>
+          </div>
+        </div>
+
+        <div className="history-control-panels">
+          <div className="history-control-panel stack-gap-sm">
+            <h3>Select date</h3>
+            <DatePickerForm
+              defaultDate={selectedDate}
+              minDate={historyAvailability.min_available_date ?? selectedDate}
+              maxDate={historyAvailability.max_available_date ?? selectedDate}
+              submitLabel="Load historical picks"
+              actionPath="/history"
+              market={selectedMarket}
+            />
+            <p className="helper-text">Saved snapshots: {availableDates.length > 0 ? availableDates.length : 0} dates.</p>
+            <p className="helper-text">
+              {historyAvailability.min_available_date && historyAvailability.max_available_date
+                ? `Available range: ${historyAvailability.min_available_date} to ${historyAvailability.max_available_date}.`
+                : "No archived date range is available yet."}
+            </p>
+          </div>
+
+          <div className="history-control-panel stack-gap-sm">
+            <h3>Quick archive dates</h3>
+            {availableDates.length > 0 ? (
+              <div className="history-quick-date-grid">
+                {availableDates.map((availableDate) => (
+                  <Link
+                    key={availableDate}
+                    href={`/history?date=${encodeURIComponent(availableDate)}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`}
+                    className={`history-date-pill${availableDate === selectedDate ? " is-active" : ""}`}
+                  >
+                    {availableDate === selectedDate ? `Selected · ${availableDate}` : availableDate}
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <p className="empty-state">No saved archive dates yet.</p>
+            )}
+          </div>
+        </div>
+      </section>
+      <section className="card history-status-card stack-gap">
+        <h2>Archive snapshot status</h2>
         {snapshot ? (
           <p className="helper-text"><strong>Locked snapshot.</strong> Created at {new Date(snapshot.snapshot_created_at).toLocaleString("en-US", { timeZone: "America/New_York" })} ET.</p>
         ) : historyResponse.is_locked ? (
@@ -88,11 +124,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
         ) : (
           <p className="helper-text"><strong>Live (not locked yet).</strong> Historical snapshots are created 1 hour before the first game starts in ET.</p>
         )}
-        <div className="stack-gap-sm">
-          <Link href={recommendationHistoryExportUrl("json", selectedDate, selectedMarket)} className="secondary-link">Export JSON (locked data)</Link>
-          <Link href={recommendationHistoryExportUrl("csv", selectedDate, selectedMarket)} className="secondary-link">Export CSV (locked data)</Link>
-          <Link href={recommendationHistoryExportUrl("xlsx", selectedDate, selectedMarket)} className="secondary-link">Export Excel (locked data)</Link>
-        </div>
+        <p className="helper-text">Lock cutoff (ET): {historyResponse.lock_cutoff_et ? new Date(historyResponse.lock_cutoff_et).toLocaleString("en-US", { timeZone: "America/New_York" }) : "Not available"}</p>
       </section>
 
       {!snapshot ? (
@@ -102,8 +134,13 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
       ) : (
         <>
           <section className="card stack-gap">
-            <h2>Top 3 overall · {marketTitle}</h2>
-            <StatusSummary summary={topOverallSummary} label="Top Overall Summary" />
+            <div className="history-section-header">
+              <div className="stack-gap-sm">
+                <p className="history-section-kicker">Top Overall</p>
+                <h2>Best historical picks · {marketTitle}</h2>
+              </div>
+              <StatusSummary summary={topOverallSummary} label="Top Overall Summary" />
+            </div>
             {snapshot.top_overall.length === 0 ? (
               <p className="empty-state">No stored overall picks for this snapshot.</p>
             ) : (
@@ -116,11 +153,18 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
           </section>
 
           <section className="stack-gap">
-            <h2>Game-level picks</h2>
+            <div className="history-section-header">
+              <div className="stack-gap-sm">
+                <p className="history-section-kicker">Game Archive</p>
+                <h2>Game-level saved picks</h2>
+              </div>
+            </div>
             {snapshot.games.map((gameSnapshot) => (
-              <article key={gameSnapshot.game.game_id} className="card stack-gap">
-                <h3>{gameSnapshot.game.away_team} @ {gameSnapshot.game.home_team}</h3>
-                <p className="helper-text">Start {gameSnapshot.game.display_game_time ?? new Date(gameSnapshot.game.game_time).toLocaleString("en-US", { timeZone: displayTimezone })} {gameSnapshot.game.display_timezone ?? displayTimezone}</p>
+              <article key={gameSnapshot.game.game_id} className="card stack-gap history-game-card">
+                <div className="history-game-header">
+                  <h3>{gameSnapshot.game.away_team} @ {gameSnapshot.game.home_team}</h3>
+                  <p className="helper-text">Start {gameSnapshot.game.display_game_time ?? new Date(gameSnapshot.game.game_time).toLocaleString("en-US", { timeZone: displayTimezone })} {gameSnapshot.game.display_timezone ?? displayTimezone}</p>
+                </div>
                 <div className="stack-gap">
                   <h4>Top 3 Plays</h4>
                   <StatusSummary summary={summarizeStatuses(gameSnapshot.top_plays)} label="Top Plays Summary" />
@@ -181,8 +225,10 @@ function summarizeStatuses(picks: Recommendation[]): { hit: number; miss: number
 
 function StatusSummary({ summary, label }: { summary: { hit: number; miss: number; pending: number }; label: string }) {
   return (
-    <p className="helper-text">
-      {label}: Hits {summary.hit} · Misses {summary.miss} · Pending {summary.pending}
-    </p>
+    <div className="history-status-summary" aria-label={label}>
+      <span className="history-status-chip history-status-chip-hit">Hits {summary.hit}</span>
+      <span className="history-status-chip history-status-chip-miss">Misses {summary.miss}</span>
+      <span className="history-status-chip history-status-chip-pending">Pending {summary.pending}</span>
+    </div>
   );
 }
