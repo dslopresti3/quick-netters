@@ -11,6 +11,7 @@ class APIModel(BaseModel):
 
 
 ConfidenceTag = Literal["high", "medium", "watch"]
+HistoricalResultStatus = Literal["pending", "hit", "miss"]
 
 
 DateAvailabilityStatus = Literal["invalid_date", "no_schedule", "missing_projections", "missing_odds", "ready"]
@@ -94,6 +95,11 @@ class Recommendation(APIModel):
     confidence_tag: ConfidenceTag | None = None
     goals_this_year: float | None = None
     first_goals_this_year: float | None = None
+    result_status: HistoricalResultStatus = "pending"
+    game_completed: bool = False
+    graded_at: datetime | None = None
+    actual_stat_value: float | int | None = None
+    actual_result_detail: str | None = None
 
 
 class GamesResponse(APIModel):

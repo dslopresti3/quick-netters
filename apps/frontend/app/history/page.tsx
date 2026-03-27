@@ -3,6 +3,7 @@ import { DatePickerForm } from "../../components/date-picker-form";
 import { MarketToggle } from "../../components/market-toggle";
 import { RecommendationCard } from "../../components/recommendation-card";
 import { fetchRecommendationHistory, fetchRecommendationHistoryAvailability, getCurrentUtcDate, recommendationHistoryExportUrl, resolveDisplayTimezone } from "../../lib/api";
+import { Recommendation } from "../../lib/interfaces";
 import { marketLabel, resolveMarket } from "../../lib/market";
 
 type HistoryPageProps = {
@@ -22,6 +23,7 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
   const historyAvailability = await fetchRecommendationHistoryAvailability(selectedDate, selectedMarket);
   const historyResponse = await fetchRecommendationHistory(selectedDate, selectedMarket);
   const snapshot = historyResponse.snapshots[0];
+  const topOverallSummary = summarizeStatuses(snapshot?.top_overall ?? []);
 
   return (
     <main className="page stack-gap-lg">
@@ -90,12 +92,13 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
         <>
           <section className="card stack-gap">
             <h2>Top 3 overall · {marketTitle}</h2>
+            <StatusSummary summary={topOverallSummary} label="Top Overall Summary" />
             {snapshot.top_overall.length === 0 ? (
               <p className="empty-state">No stored overall picks for this snapshot.</p>
             ) : (
               <div className="recommendation-grid">
                 {snapshot.top_overall.map((pick, index) => (
-                  <RecommendationCard key={`${pick.game_id}-${pick.player_id}`} recommendation={pick} rank={index + 1} market={selectedMarket} />
+                  <HistoricalPickCard key={`${pick.game_id}-${pick.player_id}`} pick={pick} selectedMarket={selectedMarket} rank={index + 1} />
                 ))}
               </div>
             )}
@@ -109,17 +112,18 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
                 <p className="helper-text">Start {gameSnapshot.game.display_game_time ?? new Date(gameSnapshot.game.game_time).toLocaleString("en-US", { timeZone: displayTimezone })} {gameSnapshot.game.display_timezone ?? displayTimezone}</p>
                 <div className="stack-gap">
                   <h4>Top 3 Plays</h4>
+                  <StatusSummary summary={summarizeStatuses(gameSnapshot.top_plays)} label="Top Plays Summary" />
                   {gameSnapshot.top_plays.length === 0 ? <p className="empty-state">No qualified top plays.</p> : (
                     <div className="recommendation-grid">
                       {gameSnapshot.top_plays.map((pick, index) => (
-                        <RecommendationCard key={`top-${gameSnapshot.game.game_id}-${pick.player_id}`} recommendation={pick} rank={index + 1} market={selectedMarket} />
+                        <HistoricalPickCard key={`top-${gameSnapshot.game.game_id}-${pick.player_id}`} pick={pick} selectedMarket={selectedMarket} rank={index + 1} />
                       ))}
                     </div>
                   )}
                   <h4>Best Bet</h4>
-                  {gameSnapshot.best_bet ? <RecommendationCard recommendation={gameSnapshot.best_bet} market={selectedMarket} /> : <p className="empty-state">No best bet stored.</p>}
+                  {gameSnapshot.best_bet ? <HistoricalPickCard pick={gameSnapshot.best_bet} selectedMarket={selectedMarket} /> : <p className="empty-state">No best bet stored.</p>}
                   <h4>Underdog Value Play</h4>
-                  {gameSnapshot.underdog_value_play ? <RecommendationCard recommendation={gameSnapshot.underdog_value_play} market={selectedMarket} /> : <p className="empty-state">No underdog value play stored.</p>}
+                  {gameSnapshot.underdog_value_play ? <HistoricalPickCard pick={gameSnapshot.underdog_value_play} selectedMarket={selectedMarket} /> : <p className="empty-state">No underdog value play stored.</p>}
                 </div>
               </article>
             ))}
@@ -127,5 +131,37 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
         </>
       )}
     </main>
+  );
+}
+
+function HistoricalPickCard({ pick, selectedMarket, rank }: { pick: Recommendation; selectedMarket: "first_goal" | "anytime"; rank?: number }) {
+  return (
+    <div className="stack-gap-sm">
+      <div className={`history-result-badge history-result-${pick.result_status}`}>
+        <strong>{pick.result_status.toUpperCase()}</strong>
+        {pick.actual_result_detail ? ` · ${pick.actual_result_detail}` : ""}
+      </div>
+      <RecommendationCard recommendation={pick} rank={rank} market={selectedMarket} />
+    </div>
+  );
+}
+
+function summarizeStatuses(picks: Recommendation[]): { hit: number; miss: number; pending: number } {
+  return picks.reduce(
+    (acc, pick) => {
+      if (pick.result_status === "hit") acc.hit += 1;
+      else if (pick.result_status === "miss") acc.miss += 1;
+      else acc.pending += 1;
+      return acc;
+    },
+    { hit: 0, miss: 0, pending: 0 },
+  );
+}
+
+function StatusSummary({ summary, label }: { summary: { hit: number; miss: number; pending: number }; label: string }) {
+  return (
+    <p className="helper-text">
+      {label}: Hits {summary.hit} · Misses {summary.miss} · Pending {summary.pending}
+    </p>
   );
 }

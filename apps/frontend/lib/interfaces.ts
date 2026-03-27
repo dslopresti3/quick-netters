@@ -1,4 +1,5 @@
 export type ConfidenceTag = "high" | "medium" | "watch";
+export type HistoricalResultStatus = "pending" | "hit" | "miss";
 
 export type DateAvailabilityStatus = "invalid_date" | "no_schedule" | "missing_projections" | "missing_odds" | "ready";
 
@@ -54,6 +55,11 @@ export interface Recommendation {
   confidence_tag?: ConfidenceTag;
   goals_this_year?: number;
   first_goals_this_year?: number;
+  result_status: HistoricalResultStatus;
+  game_completed: boolean;
+  graded_at?: string;
+  actual_stat_value?: number;
+  actual_result_detail?: string;
 }
 
 export interface GamesResponse {

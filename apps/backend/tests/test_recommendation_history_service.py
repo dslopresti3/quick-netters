@@ -7,6 +7,7 @@ from zipfile import ZipFile
 
 from app.api.schemas import GameSummary, Recommendation
 from app.services.interfaces import ScheduleProvider
+from app.services.recommendation_history import GameOutcome
 from app.services.recommendation_history import RecommendationHistoryService
 
 
@@ -53,11 +54,16 @@ class _MutableRecommendationService:
         )
 
 
+def _pending_outcome(_: str) -> GameOutcome:
+    return GameOutcome(game_completed=False, first_goal_scorer_player_id=None, goal_counts_by_player_id={})
+
+
 def test_lock_cutoff_is_calculated_in_eastern_time(tmp_path: Path) -> None:
     service = RecommendationHistoryService(
         recommendation_service=_MutableRecommendationService(),  # type: ignore[arg-type]
         schedule_provider=_StubScheduleProvider(),
         storage_path=tmp_path / "history.json",
+        outcome_fetcher=_pending_outcome,
     )
 
     earliest_et, cutoff_et = service.compute_lock_context(date(2026, 3, 26))  # type: ignore[assignment]
@@ -74,6 +80,7 @@ def test_snapshot_persists_and_does_not_change_after_lock(tmp_path: Path) -> Non
         recommendation_service=rec_service,  # type: ignore[arg-type]
         schedule_provider=_StubScheduleProvider(),
         storage_path=history_path,
+        outcome_fetcher=_pending_outcome,
     )
     selected_date = date(2026, 3, 26)
 
@@ -100,6 +107,7 @@ def test_snapshot_not_created_before_lock(tmp_path: Path) -> None:
         recommendation_service=_MutableRecommendationService(),  # type: ignore[arg-type]
         schedule_provider=_StubScheduleProvider(),
         storage_path=tmp_path / "history.json",
+        outcome_fetcher=_pending_outcome,
     )
 
     selected_date = date(2026, 3, 26)
@@ -120,6 +128,7 @@ def test_snapshot_is_retrievable_on_future_day_from_persisted_storage(tmp_path: 
         recommendation_service=_MutableRecommendationService(),  # type: ignore[arg-type]
         schedule_provider=_StubScheduleProvider(),
         storage_path=history_path,
+        outcome_fetcher=_pending_outcome,
     )
     writer_service.ensure_snapshot(selected_date, "first_goal", now_utc=lock_time_utc)
 
@@ -127,6 +136,7 @@ def test_snapshot_is_retrievable_on_future_day_from_persisted_storage(tmp_path: 
         recommendation_service=_MutableRecommendationService(),  # type: ignore[arg-type]
         schedule_provider=_StubScheduleProvider(),
         storage_path=history_path,
+        outcome_fetcher=_pending_outcome,
     )
     loaded = reader_service.get_snapshot(selected_date, "first_goal")
 
@@ -144,6 +154,7 @@ def test_existing_locked_snapshot_is_not_overwritten_after_restart(tmp_path: Pat
         recommendation_service=_MutableRecommendationService(),  # type: ignore[arg-type]
         schedule_provider=_StubScheduleProvider(),
         storage_path=history_path,
+        outcome_fetcher=_pending_outcome,
     )
     writer_service.ensure_snapshot(selected_date, "first_goal", now_utc=lock_time_utc)
 
@@ -153,6 +164,7 @@ def test_existing_locked_snapshot_is_not_overwritten_after_restart(tmp_path: Pat
         recommendation_service=changed_recommendation_service,  # type: ignore[arg-type]
         schedule_provider=_StubScheduleProvider(),
         storage_path=history_path,
+        outcome_fetcher=_pending_outcome,
     )
     same_snapshot = restarted_service.ensure_snapshot(selected_date, "first_goal", now_utc=lock_time_utc)
 
@@ -169,6 +181,7 @@ def test_export_includes_game_context_and_implied_probability_for_csv_and_xlsx(t
         recommendation_service=_MutableRecommendationService(),  # type: ignore[arg-type]
         schedule_provider=_StubScheduleProvider(),
         storage_path=history_path,
+        outcome_fetcher=_pending_outcome,
     )
     service.ensure_snapshot(selected_date, "first_goal", now_utc=lock_time_utc)
 
@@ -180,8 +193,8 @@ def test_export_includes_game_context_and_implied_probability_for_csv_and_xlsx(t
     assert "home_team" in csv_rows[0]
     assert "away_team" in csv_rows[0]
     assert "implied_probability" in csv_rows[0]
-    assert "2026-03-24,first_goal,2026-03-24,,,top_overall,1,p1,Player Alpha,Home,0.2,0.1,900,0.1,0.15" in csv_rows
-    assert "2026-03-24,first_goal,2026-03-24,Home,Away,top_plays,1,p1,Player Alpha,Home,0.2,0.1,900,0.1,0.15" in csv_rows
+    assert "2026-03-24,first_goal,2026-03-24,,,top_overall,1,p1,Player Alpha,Home,0.2,0.1,900,0.1,0.15,pending,False,,," in csv_rows
+    assert "2026-03-24,first_goal,2026-03-24,Home,Away,top_plays,1,p1,Player Alpha,Home,0.2,0.1,900,0.1,0.15,pending,False,,," in csv_rows
 
     workbook_bytes = service.export_xlsx(selected_date=selected_date, market="first_goal")
     with ZipFile(BytesIO(workbook_bytes)) as archive:
@@ -206,6 +219,7 @@ def test_export_uses_stored_implied_probability_without_recalculating(tmp_path: 
         recommendation_service=_MutableRecommendationService(),  # type: ignore[arg-type]
         schedule_provider=_StubScheduleProvider(),
         storage_path=history_path,
+        outcome_fetcher=_pending_outcome,
     )
     service.ensure_snapshot(selected_date, "first_goal", now_utc=lock_time_utc)
 
@@ -215,4 +229,4 @@ def test_export_uses_stored_implied_probability_without_recalculating(tmp_path: 
     service._save_storage(payload)  # noqa: SLF001
 
     csv_payload = service.export_csv(selected_date=selected_date, market="first_goal")
-    assert "2026-03-24,first_goal,2026-03-24,,,top_overall,1,p1,Player Alpha,Home,0.2,0.3333,900,0.1,0.15" in csv_payload
+    assert "2026-03-24,first_goal,2026-03-24,,,top_overall,1,p1,Player Alpha,Home,0.2,0.3333,900,0.1,0.15,pending,False,,," in csv_payload
