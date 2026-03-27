@@ -25,6 +25,18 @@ class PlayerHistoricalProduction:
     recent_10_first_period_goals: float | None = None
     recent_5_first_period_shots: float | None = None
     recent_10_first_period_shots: float | None = None
+    projected_goals_per_game: float | None = None
+    projected_shots_per_game: float | None = None
+    projected_goals_per_60: float | None = None
+    projected_pp_goals_per_60: float | None = None
+    season_confidence: float | None = None
+    recent_form_confidence: float | None = None
+    opponent_goals_allowed_per_game: float | None = None
+    opponent_penalty_kill_pct: float | None = None
+    vs_opponent_team_goal_rate_index: float | None = None
+    vs_opponent_team_confidence: float | None = None
+    vs_opposing_goalie_goal_rate_index: float | None = None
+    vs_opposing_goalie_confidence: float | None = None
 
 
 @dataclass(frozen=True)
