@@ -324,6 +324,102 @@ h4 {
   margin-top: 0.75rem;
 }
 
+.slate-overview-card {
+  background:
+    linear-gradient(130deg, rgba(52, 83, 156, 0.22) 0%, transparent 45%),
+    linear-gradient(180deg, rgba(19, 30, 54, 0.98) 0%, rgba(13, 22, 40, 0.98) 100%);
+  border-color: rgba(92, 125, 194, 0.62);
+}
+
+.slate-overview-kicker {
+  margin: 0;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #99b5ff;
+  font-weight: 800;
+}
+
+.slate-overview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.slate-overview-metrics {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.slate-overview-metric {
+  border: 1px solid rgba(103, 130, 189, 0.42);
+  border-radius: 12px;
+  background: rgba(9, 17, 32, 0.88);
+  padding: 0.64rem 0.72rem;
+}
+
+.slate-overview-metric strong {
+  margin-top: 0.2rem;
+  display: block;
+  color: var(--text-strong);
+  font-size: 1.15rem;
+  letter-spacing: -0.01em;
+}
+
+.slate-overview-controls {
+  border-top: 1px solid rgba(119, 144, 205, 0.28);
+  padding-top: 0.7rem;
+}
+
+.slate-featured-top {
+  border-color: rgba(96, 130, 214, 0.7);
+  background:
+    linear-gradient(145deg, rgba(71, 111, 216, 0.22) 0%, transparent 50%),
+    linear-gradient(180deg, rgba(21, 34, 59, 0.98) 0%, rgba(14, 25, 44, 0.98) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(185, 205, 255, 0.1),
+    0 18px 34px rgba(6, 14, 34, 0.45);
+}
+
+.slate-featured-grid .recommendation-card:first-child {
+  border-color: rgba(126, 160, 255, 0.75);
+  box-shadow:
+    inset 0 1px 0 rgba(199, 216, 255, 0.12),
+    0 15px 30px rgba(22, 50, 118, 0.45);
+}
+
+.slate-games-section > h2 {
+  margin-bottom: -0.15rem;
+}
+
+.slate-matchup-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.slate-matchup-card {
+  background:
+    linear-gradient(180deg, rgba(20, 31, 53, 0.98) 0%, rgba(13, 21, 38, 0.98) 100%);
+  border-color: rgba(72, 93, 138, 0.62);
+}
+
+.slate-matchup-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid rgba(124, 149, 205, 0.2);
+}
+
+.slate-matchup-grid {
+  margin-top: 0.2rem;
+}
+
 .game-card-link {
   display: block;
   text-decoration: none;
@@ -772,6 +868,14 @@ h4 {
   .hero-chip {
     font-size: 0.67rem;
   }
+
+  .slate-overview-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .slate-matchup-header .secondary-link {
+    width: 100%;
+  }
 }
 
 .metric-chip-value strong {
@@ -839,6 +943,16 @@ h4 {
   .featured-recommendations-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     align-items: start;
+  }
+
+  .slate-matchup-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .slate-page {
+    max-width: 1160px;
   }
 }
 
