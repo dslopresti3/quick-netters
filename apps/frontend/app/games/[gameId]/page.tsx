@@ -78,7 +78,9 @@ function RecommendationSection({
 }) {
   return (
     <section className={`card stack-gap recommendation-panel${featuredClassName ? ` ${featuredClassName}` : ""}`}>
-      <h2>{title}</h2>
+      <div className="recommendation-section-heading">
+        <h2>{title}</h2>
+      </div>
       <p className="helper-text">{description}</p>
       {picks.length === 0 ? (
         <p className="empty-state">{emptyState}</p>
@@ -197,8 +199,8 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
     gameResponse.game.home_team,
   );
   const featuredProjectionRows = [
-    { team: gameResponse.game.away_team, leader: awayTeamLeader },
-    { team: gameResponse.game.home_team, leader: homeTeamLeader },
+    { team: gameResponse.game.away_team, leader: awayTeamLeader, side: "Away" },
+    { team: gameResponse.game.home_team, leader: homeTeamLeader, side: "Home" },
   ];
   const featuredScorerLabel = selectedMarket === "anytime" ? "Top projected anytime scorer" : "Top projected first-goal scorer";
   const projectionMetricLabel = selectedMarket === "anytime" ? "Anytime scoring probability" : "First-goal probability";
@@ -248,25 +250,36 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
 
       <section className="card stack-gap featured-scorer-summary">
         <div className="featured-summary-header">
-          <h2>{featuredScorerLabel}s by team</h2>
-          <p className="helper-text">Quick matchup view of each team&apos;s top projected scorer for the selected market.</p>
+          <div>
+            <p className="featured-summary-kicker">Matchup Focus</p>
+            <h2>{featuredScorerLabel}s by team</h2>
+          </div>
+          <div className="featured-summary-context">
+            <span className={`market-chip market-chip-${selectedMarket}`}>{selectedMarketLabel}</span>
+            <span className="featured-summary-date">{gameResponse.date}</span>
+          </div>
         </div>
-        <ul className="featured-scorer-list">
-          {featuredProjectionRows.map(({ team, leader }) => (
-            <li key={team} className="featured-scorer-row">
-              {leader ? (
-                <div>
-                  <p className="featured-scorer-rank">{featuredScorerLabel}</p>
-                  <p className="featured-scorer-name">{leader.player_name}</p>
-                  <p className="helper-text">{leader.team_name ?? leader.player_team ?? team}</p>
-                </div>
-              ) : (
-                <div>
-                  <p className="featured-scorer-rank">{featuredScorerLabel}</p>
-                  <p className="featured-scorer-name">{team}</p>
-                  <p className="helper-text">Top projected scorer unavailable.</p>
-                </div>
-              )}
+        <p className="helper-text">Quick matchup view of each team&apos;s top projected scorer for the selected market.</p>
+        <ul className="featured-scorer-list featured-scorer-list-matchup">
+          {featuredProjectionRows.map(({ team, leader, side }) => (
+            <li key={team} className="featured-scorer-row featured-scorer-row-matchup">
+              <p className="featured-scorer-side">{side}</p>
+              <p className="featured-scorer-team">{team}</p>
+              <div className="featured-scorer-body">
+                {leader ? (
+                  <>
+                    <p className="featured-scorer-rank">{featuredScorerLabel}</p>
+                    <p className="featured-scorer-name">{leader.player_name}</p>
+                    <p className="helper-text">{leader.team_name ?? leader.player_team ?? team}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="featured-scorer-rank">{featuredScorerLabel}</p>
+                    <p className="featured-scorer-name">{team}</p>
+                    <p className="helper-text">Top projected scorer unavailable.</p>
+                  </>
+                )}
+              </div>
               <div className="featured-scorer-metric">
                 <span className="metric-label">{projectionMetricLabel}</span>
                 {leader ? (
@@ -304,25 +317,31 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
             ranked
             cardVariant="top_play"
           />
-          <div className="featured-recommendations-grid">
-            <RecommendationSection
-              title="Best Bet"
-              selectedMarket={selectedMarket}
-              description="The single strongest overall play from the blended probability + value model."
-              picks={bestBet ? [bestBet] : []}
-              emptyState="No best bet is qualified for this game yet."
-              featuredClassName="featured-best-bet"
-              cardVariant="best_bet"
-            />
-            <RecommendationSection
-              title="Underdog Value Play"
-              selectedMarket={selectedMarket}
-              description="A higher-risk, higher-payout option with positive EV and edge."
-              picks={underdogPlay ? [underdogPlay] : []}
-              emptyState="No underdog value play is qualified for this game yet."
-              featuredClassName="featured-underdog"
-              cardVariant="underdog_value"
-            />
+          <div className="featured-recommendations-group">
+            <div className="recommendation-section-heading recommendation-section-heading-featured">
+              <h2>Featured Companion Plays</h2>
+              <p className="helper-text">Pair the strongest core play with a differentiated upside option.</p>
+            </div>
+            <div className="featured-recommendations-grid">
+              <RecommendationSection
+                title="Best Bet"
+                selectedMarket={selectedMarket}
+                description="The single strongest overall play from the blended probability + value model."
+                picks={bestBet ? [bestBet] : []}
+                emptyState="No best bet is qualified for this game yet."
+                featuredClassName="featured-best-bet"
+                cardVariant="best_bet"
+              />
+              <RecommendationSection
+                title="Underdog Value Play"
+                selectedMarket={selectedMarket}
+                description="A higher-risk, higher-payout option with positive EV and edge."
+                picks={underdogPlay ? [underdogPlay] : []}
+                emptyState="No underdog value play is qualified for this game yet."
+                featuredClassName="featured-underdog"
+                cardVariant="underdog_value"
+              />
+            </div>
           </div>
         </section>
       )}
