@@ -273,6 +273,14 @@ h4 {
   padding: 0.9rem 1rem;
 }
 
+.page-hero-first_goal {
+  box-shadow: inset 0 1px 0 rgba(193, 212, 255, 0.08);
+}
+
+.page-hero-anytime {
+  box-shadow: inset 0 1px 0 rgba(178, 239, 229, 0.08);
+}
+
 .stack-gap > * + * { margin-top: var(--space-md); }
 .stack-gap-sm > * + * { margin-top: 0.5rem; }
 .stack-gap-lg > * + * { margin-top: var(--space-lg); }
@@ -307,7 +315,7 @@ h4 {
 .date-picker-form input,
 .date-picker-form button {
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 0.58rem 0.76rem;
   font-size: 0.95rem;
   background: var(--surface-base);
@@ -364,7 +372,7 @@ h4 {
   text-decoration: none;
   font-weight: 600;
   border: 1px solid rgba(102, 129, 188, 0.5);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: rgba(17, 26, 45, 0.9);
   padding: 0.4rem 0.72rem;
   box-shadow: inset 0 1px 0 rgba(181, 202, 255, 0.06);
@@ -405,6 +413,9 @@ h4 {
 .market-toggle-option.is-active {
   background: linear-gradient(180deg, color-mix(in srgb, var(--market-accent-soft) 92%, transparent) 0%, color-mix(in srgb, var(--market-accent-soft) 58%, transparent) 100%);
   color: #dce8ff;
+  box-shadow:
+    inset 0 1px 0 rgba(207, 225, 255, 0.1),
+    0 6px 14px rgba(var(--market-accent-rgb), 0.16);
 }
 
 .market-toggle-option:hover {
@@ -744,7 +755,7 @@ h4 {
 
 .recommendation-card {
   border: 1px solid var(--border-default);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   padding: 0.95rem 1rem;
   background:
     linear-gradient(160deg, rgba(53, 78, 126, 0.08) 0%, transparent 42%),
@@ -777,6 +788,14 @@ h4 {
   background:
     linear-gradient(145deg, rgba(108, 68, 166, 0.17) 0%, transparent 48%),
     linear-gradient(180deg, rgba(31, 33, 63, 0.97) 0%, rgba(17, 23, 42, 0.97) 100%);
+}
+
+.market-theme-first_goal .recommendation-card-top_play {
+  border-left-color: rgba(113, 154, 255, 0.94);
+}
+
+.market-theme-anytime .recommendation-card-top_play {
+  border-left-color: rgba(86, 208, 187, 0.9);
 }
 
 .featured-best-bet {
@@ -991,7 +1010,7 @@ h4 {
 
 .recommendation-section-heading {
   margin-bottom: 0.16rem;
-  padding-bottom: 0.48rem;
+  padding-bottom: 0.56rem;
   border-bottom: 1px solid rgba(137, 161, 212, 0.2);
 }
 
@@ -1030,28 +1049,28 @@ h4 {
 }
 
 .game-detail-page {
-  padding-top: 1.25rem;
-  padding-bottom: 1.8rem;
+  padding-top: 1rem;
+  padding-bottom: 2.1rem;
 }
 
 .game-detail-page .stack-gap > * + * {
-  margin-top: 0.72rem;
+  margin-top: 0.9rem;
 }
 
 .game-detail-page .stack-gap-lg > * + * {
-  margin-top: 0.84rem;
+  margin-top: var(--space-lg);
 }
 
 .game-detail-page .card {
-  padding: 0.82rem 0.88rem;
+  padding: 1rem;
 }
 
 .game-detail-page .featured-scorer-summary {
-  padding: 0.9rem 0.92rem;
+  padding: 1rem;
 }
 
 .game-detail-page .page-hero {
-  padding: 0.76rem 0.86rem;
+  padding: 0.88rem 0.95rem;
 }
 
 .game-detail-page .page-hero h1 {
@@ -1117,6 +1136,7 @@ h4 {
   letter-spacing: 0.03em;
   text-transform: uppercase;
   border: 1px solid transparent;
+  box-shadow: inset 0 1px 0 rgba(205, 223, 255, 0.08);
 }
 
 .market-chip-first_goal {
@@ -1205,7 +1225,7 @@ h4 {
 .primary-metric,
 .supporting-metric {
   border: 1px solid var(--border-default);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 0.52rem 0.56rem;
   background: rgba(8, 15, 30, 0.92);
 }
@@ -1282,7 +1302,7 @@ h4 {
 }
 
 .metric-chip {
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 0.5rem 0.56rem;
   border: 1px solid rgba(74, 198, 126, 0.45);
   background: rgba(49, 199, 122, 0.11);
@@ -1374,6 +1394,11 @@ h4 {
 
 .metrics-section-season-production .supporting-metric strong {
   font-size: 1.04rem;
+}
+
+.history-game-card h4 {
+  font-size: 0.75rem;
+  letter-spacing: 0.07em;
 }
 
 .metrics-explainer summary {
