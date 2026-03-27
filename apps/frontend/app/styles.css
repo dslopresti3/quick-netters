@@ -502,15 +502,49 @@ h4 {
 }
 
 .featured-scorer-summary {
-  padding: 0.9rem 1rem;
+  padding: 0.95rem 1rem;
+  border-color: rgba(121, 151, 236, 0.44);
+  background:
+    linear-gradient(160deg, rgba(44, 62, 106, 0.3) 0%, rgba(15, 24, 44, 0.2) 38%, transparent 70%),
+    linear-gradient(180deg, rgba(15, 24, 44, 0.96) 0%, rgba(11, 19, 33, 0.97) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(165, 187, 247, 0.08),
+    0 14px 30px rgba(2, 8, 22, 0.34);
+}
+
+.featured-summary-kicker {
+  margin: 0 0 0.3rem;
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #8aa6e8;
 }
 
 .featured-summary-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 0.75rem;
   flex-wrap: wrap;
+}
+
+.featured-summary-context {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.featured-summary-date {
+  display: inline-flex;
+  border-radius: var(--radius-pill);
+  padding: 0.18rem 0.58rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: #c2d0ec;
+  background: rgba(65, 89, 142, 0.3);
+  border: 1px solid rgba(109, 138, 202, 0.42);
 }
 
 .featured-scorer-list {
@@ -519,6 +553,11 @@ h4 {
   padding: 0;
   display: grid;
   gap: 0.55rem;
+}
+
+.featured-scorer-list-matchup {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
 }
 
 .featured-scorer-row {
@@ -530,6 +569,44 @@ h4 {
   border-radius: var(--radius-md);
   padding: 0.5rem 0.65rem;
   background: rgba(13, 20, 35, 0.86);
+}
+
+.featured-scorer-row-matchup {
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "side team"
+    "body body"
+    "metric metric";
+  align-items: start;
+  gap: 0.4rem 0.6rem;
+  padding: 0.62rem 0.68rem;
+  border-color: rgba(101, 129, 197, 0.44);
+  background:
+    linear-gradient(180deg, rgba(28, 43, 72, 0.54) 0%, rgba(14, 24, 43, 0.92) 100%);
+  min-height: 10.6rem;
+}
+
+.featured-scorer-side {
+  grid-area: side;
+  margin: 0;
+  align-self: center;
+  font-size: 0.64rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: #8ca8e8;
+}
+
+.featured-scorer-team {
+  grid-area: team;
+  margin: 0;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #c9d8f6;
+}
+
+.featured-scorer-body {
+  grid-area: body;
 }
 
 .featured-scorer-rank {
@@ -550,24 +627,58 @@ h4 {
 }
 
 .featured-scorer-metric {
-  text-align: right;
+  grid-area: metric;
+  text-align: left;
+  border-top: 1px solid rgba(121, 145, 196, 0.3);
+  padding-top: 0.45rem;
 }
 
 .featured-scorer-metric strong {
   display: block;
   margin-top: 0.15rem;
-  font-size: 1.05rem;
+  font-size: 1.28rem;
   color: var(--text-strong);
 }
 
 .recommendation-hub {
   display: grid;
+  gap: 0.65rem;
+}
+
+.recommendation-section-heading {
+  margin-bottom: 0.16rem;
+  padding-bottom: 0.48rem;
+  border-bottom: 1px solid rgba(137, 161, 212, 0.2);
+}
+
+.recommendation-section-heading h2 {
+  margin: 0;
+  font-size: 1.08rem;
+  letter-spacing: -0.01em;
+}
+
+.featured-recommendations-group {
+  border-top: 1px solid rgba(126, 151, 199, 0.24);
+  padding-top: 0.5rem;
+}
+
+.recommendation-section-heading-featured {
+  display: flex;
+  justify-content: space-between;
   gap: 0.7rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.recommendation-section-heading-featured .helper-text {
+  margin: 0;
+  max-width: 31rem;
 }
 
 .featured-recommendations-grid {
   display: grid;
-  gap: 0.7rem;
+  gap: 0.65rem;
+  margin-top: 0.5rem;
 }
 
 .recommendation-panel .recommendation-grid {
@@ -580,19 +691,27 @@ h4 {
 }
 
 .game-detail-page .stack-gap > * + * {
-  margin-top: 0.8rem;
+  margin-top: 0.72rem;
 }
 
 .game-detail-page .stack-gap-lg > * + * {
-  margin-top: 0.9rem;
+  margin-top: 0.84rem;
 }
 
 .game-detail-page .card {
-  padding: 0.9rem;
+  padding: 0.82rem 0.88rem;
 }
 
 .game-detail-page .featured-scorer-summary {
-  padding: 0.8rem 0.9rem;
+  padding: 0.9rem 0.92rem;
+}
+
+.game-detail-page .page-hero {
+  padding: 0.76rem 0.86rem;
+}
+
+.game-detail-page .page-hero h1 {
+  font-size: clamp(1.28rem, 2.5vw, 1.62rem);
 }
 
 .recommendation-card-header {
@@ -916,6 +1035,15 @@ h4 {
 }
 
 @media (max-width: 640px) {
+  .featured-summary-context {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .featured-scorer-list-matchup {
+    grid-template-columns: 1fr;
+  }
+
   .featured-scorer-row {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -947,6 +1075,12 @@ h4 {
 
   .slate-matchup-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 880px) {
+  .recommendation-section-heading-featured {
+    align-items: flex-start;
   }
 }
 
