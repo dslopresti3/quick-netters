@@ -14,6 +14,10 @@ DEFAULT_LEAGUE_BASELINE = {
     "shots_per_60": 9.2,
     "pp_goals_per_60": 2.2,
 }
+TEAM_MATCHUP_PRIOR_GAMES = 14.0
+GOALIE_MATCHUP_PRIOR_GAMES = 10.0
+TEAM_MATCHUP_MAX_INFLUENCE = 0.35
+GOALIE_MATCHUP_MAX_INFLUENCE = 0.25
 
 
 def build_feature_rows(team_games: list[dict], odds_rows: list[dict]) -> list[dict]:
@@ -51,6 +55,8 @@ def build_player_probability_features(
     *,
     as_of_date: date,
     season: str | None = None,
+    matchup_team_by_player: dict[str, str] | None = None,
+    matchup_goalie_by_player: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Build player-level feature rows for projection models (e.g., anytime, first-goal)."""
     eligible_rows = [
@@ -165,6 +171,33 @@ def build_player_probability_features(
             projection_weight * recent_projection_components["pp_goals_per_60"]
             + (1.0 - projection_weight) * season_stabilized["pp_goals_per_60"]
         )
+
+        matchup_team = (matchup_team_by_player or {}).get(player_id) or str(latest.get("opponent", "")).strip()
+        row["matchup_opponent_team"] = matchup_team
+        team_matchup = _build_matchup_history_features(
+            rows=player_rows,
+            baseline_goals_per_game=row["projected_goals_per_game"],
+            baseline_shots_per_game=row["projected_shots_per_game"],
+            filter_field="opponent",
+            filter_value=matchup_team,
+            prior_games=TEAM_MATCHUP_PRIOR_GAMES,
+            max_influence=TEAM_MATCHUP_MAX_INFLUENCE,
+        )
+        row.update({f"vs_opponent_team_{key}": value for key, value in team_matchup.items()})
+
+        matchup_goalie = (matchup_goalie_by_player or {}).get(player_id) or str(latest.get("opposing_goalie_id", "")).strip()
+        row["matchup_opposing_goalie_id"] = matchup_goalie
+        goalie_matchup = _build_matchup_history_features(
+            rows=player_rows,
+            baseline_goals_per_game=row["projected_goals_per_game"],
+            baseline_shots_per_game=row["projected_shots_per_game"],
+            filter_field="opposing_goalie_id",
+            filter_value=matchup_goalie,
+            prior_games=GOALIE_MATCHUP_PRIOR_GAMES,
+            max_influence=GOALIE_MATCHUP_MAX_INFLUENCE,
+        )
+        row.update({f"vs_opposing_goalie_{key}": value for key, value in goalie_matchup.items()})
+
         row["projection_market_ready_anytime"] = True
         row["projection_market_ready_first_goal"] = True
         feature_rows.append(row)
@@ -290,3 +323,59 @@ def _to_minutes(raw_value: Any) -> float:
 def _blend(primary: float, baseline: float, confidence: float) -> float:
     weight = max(0.0, min(1.0, confidence))
     return (weight * primary) + ((1.0 - weight) * baseline)
+
+
+def _build_matchup_history_features(
+    *,
+    rows: list[dict[str, Any]],
+    baseline_goals_per_game: float,
+    baseline_shots_per_game: float,
+    filter_field: str,
+    filter_value: str,
+    prior_games: float,
+    max_influence: float,
+) -> dict[str, float | bool]:
+    key = str(filter_value).strip()
+    if not key:
+        return {
+            "available": False,
+            "games": 0.0,
+            "goals": 0.0,
+            "shots": 0.0,
+            "goals_per_game": 0.0,
+            "shots_per_game": 0.0,
+            "goals_per_game_stabilized": baseline_goals_per_game,
+            "shots_per_game_stabilized": baseline_shots_per_game,
+            "confidence": 0.0,
+            "goals_rate_modifier": 1.0,
+            "shots_rate_modifier": 1.0,
+        }
+
+    matchup_rows = [row for row in rows if str(row.get(filter_field, "")).strip() == key]
+    block = _compute_rate_block(matchup_rows)
+    empirical_confidence = block["games"] / (block["games"] + prior_games) if block["games"] > 0 else 0.0
+    confidence = max_influence * empirical_confidence
+    goals_stabilized = _blend(block["goals_per_game"], baseline_goals_per_game, confidence)
+    shots_stabilized = _blend(block["shots_per_game"], baseline_shots_per_game, confidence)
+
+    return {
+        "available": block["games"] > 0,
+        "games": block["games"],
+        "goals": block["goals"],
+        "shots": block["shots"],
+        "goals_per_game": block["goals_per_game"],
+        "shots_per_game": block["shots_per_game"],
+        "goals_per_game_stabilized": goals_stabilized,
+        "shots_per_game_stabilized": shots_stabilized,
+        "confidence": confidence,
+        "goals_rate_modifier": _rate_modifier(stabilized=goals_stabilized, baseline=baseline_goals_per_game, max_abs_delta=0.25),
+        "shots_rate_modifier": _rate_modifier(stabilized=shots_stabilized, baseline=baseline_shots_per_game, max_abs_delta=0.3),
+    }
+
+
+def _rate_modifier(*, stabilized: float, baseline: float, max_abs_delta: float) -> float:
+    if baseline <= 0:
+        return 1.0
+    raw = (stabilized / baseline) - 1.0
+    clamped = max(-max_abs_delta, min(max_abs_delta, raw))
+    return 1.0 + clamped
