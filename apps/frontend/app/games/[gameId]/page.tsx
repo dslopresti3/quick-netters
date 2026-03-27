@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { MarketToggle } from "../../../components/market-toggle";
+import { AppShellHeader } from "../../../components/app-shell-header";
+import { PageHeader } from "../../../components/page-header";
 import { RecommendationCard } from "../../../components/recommendation-card";
 import type { Recommendation, TeamProjectionLeader } from "../../../lib/interfaces";
 import { fetchDateAvailability, fetchGameRecommendations, getCurrentUtcDate, resolveDisplayTimezone } from "../../../lib/api";
@@ -101,8 +102,19 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
 
   if (!availability.valid_by_product_rule) {
     return (
-      <main className="page">
-        <h1>Game detail</h1>
+      <main className="page stack-gap-lg">
+        <AppShellHeader
+          activeNav="slate"
+          selectedDate={selectedDate}
+          displayTimezone={displayTimezone}
+          selectedMarket={selectedMarket}
+          marketPath={`/games/${params.gameId}`}
+        />
+        <PageHeader
+          title="Game Detail"
+          description="Matchup-level model context and recommendation view."
+          contextChips={[`Market · ${selectedMarketLabel}`, `Date · ${selectedDate}`]}
+        />
         <section className="card stack-gap">
           <h2>Invalid date</h2>
           <ul className="candidate-list">
@@ -119,7 +131,18 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
   if (!availability.schedule_available) {
     return (
       <main className="page stack-gap">
-        <h1>Game detail</h1>
+        <AppShellHeader
+          activeNav="slate"
+          selectedDate={selectedDate}
+          displayTimezone={displayTimezone}
+          selectedMarket={selectedMarket}
+          marketPath={`/games/${params.gameId}`}
+        />
+        <PageHeader
+          title="Game Detail"
+          description="Matchup-level model context and recommendation view."
+          contextChips={[`Market · ${selectedMarketLabel}`, `Date · ${selectedDate}`]}
+        />
         <section className="card stack-gap">
           <h2>No scheduled games</h2>
           <ul className="candidate-list">
@@ -138,7 +161,18 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
   if (!gameResponse) {
     return (
       <main className="page stack-gap">
-        <h1>Game detail</h1>
+        <AppShellHeader
+          activeNav="slate"
+          selectedDate={selectedDate}
+          displayTimezone={displayTimezone}
+          selectedMarket={selectedMarket}
+          marketPath={`/games/${params.gameId}`}
+        />
+        <PageHeader
+          title="Game Detail"
+          description="Matchup-level model context and recommendation view."
+          contextChips={[`Market · ${selectedMarketLabel}`, `Date · ${selectedDate}`]}
+        />
         <section className="card">
           <p className="empty-state">No game detail exists for this matchup and date yet.</p>
         </section>
@@ -169,13 +203,24 @@ export default async function GameDetailPage({ params, searchParams }: GameDetai
 
   return (
     <main className="page stack-gap-lg game-detail-page">
-      <header className="stack-gap-sm">
-        <p className="subtitle">Date: {gameResponse.date} · Market: {selectedMarketLabel}</p>
-        <h1>{gameResponse.game.away_team} @ {gameResponse.game.home_team}</h1>
-        <p className="helper-text">Start {gameResponse.game.display_game_time ?? new Date(gameResponse.game.game_time).toLocaleString("en-US", { timeZone: displayTimezone })} {gameResponse.game.display_timezone ?? displayTimezone}</p>
-        <MarketToggle selectedDate={selectedDate} displayTimezone={displayTimezone} selectedMarket={selectedMarket} path={`/games/${params.gameId}`} />
-        <Link href={`/slate?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">← Back to Daily Slate</Link>
-      </header>
+      <AppShellHeader
+        activeNav="slate"
+        selectedDate={selectedDate}
+        displayTimezone={displayTimezone}
+        selectedMarket={selectedMarket}
+        marketPath={`/games/${params.gameId}`}
+        utilityLinks={[
+          {
+            href: `/slate?date=${selectedDate}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`,
+            label: "Back to Slate",
+          },
+        ]}
+      />
+      <PageHeader
+        title={`${gameResponse.game.away_team} @ ${gameResponse.game.home_team}`}
+        description={`Start ${gameResponse.game.display_game_time ?? new Date(gameResponse.game.game_time).toLocaleString("en-US", { timeZone: displayTimezone })} ${gameResponse.game.display_timezone ?? displayTimezone}`}
+        contextChips={[`Market · ${selectedMarketLabel}`, `Date · ${gameResponse.date}`, "View · Matchup Intelligence"]}
+      />
 
       {gameResponse.notes.length > 0 && (
         <section className="card stack-gap">

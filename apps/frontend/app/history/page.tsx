@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { DatePickerForm } from "../../components/date-picker-form";
-import { MarketToggle } from "../../components/market-toggle";
+import { AppShellHeader } from "../../components/app-shell-header";
+import { PageHeader } from "../../components/page-header";
 import { RecommendationCard } from "../../components/recommendation-card";
 import { fetchRecommendationHistory, fetchRecommendationHistoryAvailability, getCurrentUtcDate, recommendationHistoryExportUrl, resolveDisplayTimezone } from "../../lib/api";
 import { Recommendation } from "../../lib/interfaces";
@@ -27,14 +28,24 @@ export default async function HistoryPage({ searchParams }: HistoryPageProps) {
 
   return (
     <main className="page stack-gap-lg">
-      <header>
-        <h1>Historical Picks</h1>
-        <p className="subtitle">Stored snapshots only · Date: {selectedDate} · Market: {marketTitle}</p>
-        <MarketToggle selectedDate={selectedDate} displayTimezone={displayTimezone} selectedMarket={selectedMarket} path="/history" />
-        <Link href={`/slate?date=${encodeURIComponent(selectedDate)}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`} className="secondary-link">
-          ← Back to Daily Slate
-        </Link>
-      </header>
+      <AppShellHeader
+        activeNav="history"
+        selectedDate={selectedDate}
+        displayTimezone={displayTimezone}
+        selectedMarket={selectedMarket}
+        marketPath="/history"
+        utilityLinks={[
+          {
+            href: `/slate?date=${encodeURIComponent(selectedDate)}&timezone=${encodeURIComponent(displayTimezone)}&market=${selectedMarket}`,
+            label: "Back to Slate",
+          },
+        ]}
+      />
+      <PageHeader
+        title="Historical Picks"
+        description="Evaluate locked snapshots, outcomes, and export-ready performance data."
+        contextChips={[`Market · ${marketTitle}`, `Date · ${selectedDate}`, "Mode · Stored Snapshots"]}
+      />
 
       <section className="card stack-gap">
         <h2>Change date</h2>

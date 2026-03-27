@@ -1,4 +1,6 @@
 import { DatePickerForm } from "../components/date-picker-form";
+import { AppShellHeader } from "../components/app-shell-header";
+import { PageHeader } from "../components/page-header";
 import { fetchDateAvailability, getCurrentUtcDate } from "../lib/api";
 import Link from "next/link";
 
@@ -6,9 +8,13 @@ export default async function HomePage() {
   const availability = await fetchDateAvailability(getCurrentUtcDate());
 
   return (
-    <main className="page">
-      <h1>Quick Netters</h1>
-      <p className="subtitle">Pick a date to view first-goal or anytime goal-scorer value picks.</p>
+    <main className="page stack-gap-lg">
+      <AppShellHeader activeNav="home" />
+      <PageHeader
+        title="Quick Netters"
+        description="Premium daily first-goal and anytime goal-scorer value intelligence."
+        contextChips={["League · NHL", `Today · ${availability.selected_date}`]}
+      />
 
       <section className="card stack-gap">
         <h2>Start here</h2>
